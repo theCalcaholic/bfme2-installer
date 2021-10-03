@@ -17,35 +17,26 @@ enum Game {
     ROTWK
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum InstallerStep {
-    Inactive(Option<InstallerData>),
-    Configuration(Option<InstallerData>),
-    Register(Option<InstallerData>),
-    Validate(Option<InstallerData>)
+    Inactive,
+    Configuration,
+    Register,
+    Download,
+    Install,
+    Validate
 }
 
 impl InstallerStep {
 
-    fn nextWithData(&mut self, data: Option<InstallerData>) -> InstallerStep {
-        match self {
-            InstallerStep::Configuration(_) => InstallerStep::Register(data),
-            InstallerStep::Register(_) => InstallerStep::Validate(data),
-            InstallerStep::Validate(_) => InstallerStep::Inactive(data),
-            _ => self.clone()
-        }
-    }
-
     fn next(&mut self) -> InstallerStep {
-        self.nextWithData(None)
-    }
-
-    fn shallowCopy(self) -> InstallerStep {
         match self {
-            InstallerStep::Configuration(_) => InstallerStep::Configuration(None),
-            InstallerStep::Register(_) => InstallerStep::Register(None),
-            InstallerStep::Validate(_) => InstallerStep::Validate(None),
-            InstallerStep::Inactive(_) => InstallerStep::Inactive(None)
+            InstallerStep::Configuration => InstallerStep::Register,
+            InstallerStep::Register => InstallerStep::Download,
+            InstallerStep::Download => InstallerStep::Install,
+            InstallerStep::Install => InstallerStep::Validate,
+            InstallerStep::Validate => InstallerStep::Inactive,
+            _ => self.clone()
         }
     }
 }
@@ -80,14 +71,14 @@ impl Installer {
 
     pub fn new() -> Installer {
         Installer {
-            current_step: InstallerStep::Inactive(None),
+            current_step: InstallerStep::Inactive,
             button_states: [button::State::default()],
             data: InstallerData::defaults()
         }
     }
     pub fn view(&mut self) -> Element<Message> {
         Column::new()
-            .push(Text::new(format!("Installing {:?}", self.data.game)).size(20))
+            .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
             .push(Text::new(format!("{:?}", self.current_step)))
             .push(Button::new(&mut self.button_states[0],
                               Text::new("Next"))
@@ -96,16 +87,6 @@ impl Installer {
     }
 
     pub fn proceed(&mut self, step: InstallerStep) {
-
-        match &step {
-            InstallerStep::Configuration(data) => {
-                self.data.game = match data {
-                    None => None,
-                    Some(inst_data) => inst_data.game
-                }
-            },
-            _ => ()
-        }
 
         self.current_step = step;
     }
@@ -135,6 +116,7 @@ struct Bfme2Manager {
 
 #[derive(Debug, Clone)]
 enum Message {
+    StartInstallation(Game),
     InstallerNext(InstallerStep)
 }
 
@@ -145,12 +127,7 @@ impl Bfme2Manager {
             .push(Text::new("Installations").size(20))
             .push(Button::new(&mut self.install_button,
                               Text::new("(Re-)Install BFME"))
-                .on_press(Message::InstallerNext(InstallerStep::Configuration(
-                    Some(InstallerData{
-                        game: Some(Game::BFME2),
-                        ..InstallerData::defaults()
-                    })
-                ))))
+                .on_press(Message::StartInstallation(Game::BFME2)))
             .into()
     }}
 
@@ -177,14 +154,16 @@ impl Application for Bfme2Manager {
 
     fn update(&mut self, message: Self::Message, clipboard: &mut Clipboard) -> Command<Self::Message> {
         match message {
-            // Message::StartInstallation(game) => {
-            //     self.active_screen = Screen::Installer(game);
-            //     Command::none()
-            // },
+            Message::StartInstallation(game) => {
+                self.installer = Installer::new();
+                self.installer.data.game = Some(game);
+                self.installer.current_step = InstallerStep::Configuration;
+                Command::none()
+            },
             Message::InstallerNext(mut step) => {
                 match step {
-                    InstallerStep::Inactive(_) => {
-                        self.installer = Installer::new();
+                    InstallerStep::Inactive => {
+                        self.installer.current_step = InstallerStep::Inactive;
                     }
                     _ => {
                         self.installer.proceed(step)
@@ -199,7 +178,7 @@ impl Application for Bfme2Manager {
     fn view(&mut self) -> Element<Message> {
 
         let active_widget = match self.installer.current_step {
-            InstallerStep::Inactive(_) => self.dashboard(),
+            InstallerStep::Inactive => self.dashboard(),
             _ => self.installer.view()
         };
 
