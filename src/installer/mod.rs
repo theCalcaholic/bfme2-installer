@@ -1,4 +1,4 @@
-use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Subscription, Color, Element, Container, Length, Button, button, Align};
+use iced::{Column, Text, Element, Button, button, TextInput, text_input};
 use super::common::{Message, Game};
 
 #[derive(Debug, Clone, Copy)]
@@ -28,7 +28,7 @@ impl InstallerStep {
 #[derive(Debug, Clone)]
 pub struct InstallerData {
     pub game: Option<Game>,
-    pub path: Option<String>,
+    pub path: String,
     pub checksum: Option<String>,
     pub egrc: Option<String>
 }
@@ -37,7 +37,7 @@ impl InstallerData {
     fn defaults() -> InstallerData {
         return InstallerData {
             game: None,
-            path: None,
+            path: String::from(""),
             checksum: None,
             egrc: None
         }
@@ -47,8 +47,9 @@ impl InstallerData {
 #[derive(Debug, Clone)]
 pub struct Installer {
     pub current_step: InstallerStep,
+    pub data: InstallerData,
     button_states: [button::State; 1],
-    pub data: InstallerData
+    path_input_state: text_input::State
 }
 
 impl Installer {
@@ -56,11 +57,39 @@ impl Installer {
     pub fn new() -> Installer {
         Installer {
             current_step: InstallerStep::Inactive,
+            data: InstallerData::defaults(),
             button_states: [button::State::default()],
-            data: InstallerData::defaults()
+            path_input_state: text_input::State::default()
         }
     }
     pub fn view(&mut self) -> Element<Message> {
+        match self.current_step {
+            InstallerStep::Configuration => self.config_view(),
+            _ => self.default_view()
+        }
+    }
+
+    pub fn proceed(&mut self, step: InstallerStep) {
+
+        self.current_step = step;
+    }
+
+    fn config_view(&mut self) -> Element<Message>{
+        Column::new()
+            .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
+            .push(Text::new("Configuration"))
+            .push(TextInput::new(&mut self.path_input_state,
+                                 "install path", &self.data.path,
+                                 Message::InstallerPathUpdate))
+            .push(Text::new("Patch Level:"))
+            .push(Button::new(&mut self.button_states[0],
+                              Text::new("Next"))
+                .on_press(Message::InstallerNext(self.current_step.next())))
+            .push(Text::new(format!("data:\n{:?}", self.data)))
+            .into()
+    }
+
+    fn default_view(&mut self) -> Element<Message> {
         Column::new()
             .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
             .push(Text::new(format!("{:?}", self.current_step)))
@@ -68,10 +97,5 @@ impl Installer {
                               Text::new("Next"))
                 .on_press(Message::InstallerNext(self.current_step.next())))
             .into()
-    }
-
-    pub fn proceed(&mut self, step: InstallerStep) {
-
-        self.current_step = step;
     }
 }

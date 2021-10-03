@@ -4,11 +4,8 @@ mod common;
 use installer::{Installer, InstallerStep};
 use common::{Message, Game, Installation};
 
-use std::ptr::null;
-//use iced::{canvas::{self, Cache, Canvas, Cursor, Geometry, LineCap, Path, Stroke}, executor, time, Application, Color, Command, Container, Element, Length, Point, Rectangle, Settings, Subscription, Vector, Clipboard};
-use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Subscription, Color, Element, Container, Length, Button, button, Align};
-use iced::window::Mode;
-use iced_native::{Renderer, Widget};
+use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container,
+           Length, Button, button};
 
 pub fn main() -> iced::Result {
     Bfme2Manager::run(Settings {
@@ -64,7 +61,7 @@ impl Application for Bfme2Manager {
                 self.installer.current_step = InstallerStep::Configuration;
                 Command::none()
             },
-            Message::InstallerNext(mut step) => {
+            Message::InstallerNext(step) => {
                 match step {
                     InstallerStep::Inactive => {
                         self.installer.current_step = InstallerStep::Inactive;
@@ -73,6 +70,10 @@ impl Application for Bfme2Manager {
                         self.installer.proceed(step)
                     }
                 }
+                Command::none()
+            }
+            Message::InstallerPathUpdate(path) => {
+                self.installer.data.path = path;
                 Command::none()
             }
             _ => Command::none()

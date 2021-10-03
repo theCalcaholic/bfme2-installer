@@ -17,5 +17,6 @@ pub enum Game {
 #[derive(Debug, Clone)]
 pub enum Message {
     StartInstallation(Game),
-    InstallerNext(InstallerStep)
+    InstallerNext(InstallerStep),
+    InstallerPathUpdate(String)
 }
