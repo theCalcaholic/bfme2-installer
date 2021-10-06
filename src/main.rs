@@ -1,11 +1,12 @@
 mod installer;
 mod common;
+mod extract;
 
 use installer::{Installer, InstallerStep};
 use common::{Message, Game, Installation};
 
-use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container,
-           Length, Button, button};
+use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container, Length, Button, button, Subscription, Color};
+use iced::window::Mode;
 
 pub fn main() -> iced::Result {
     Bfme2Manager::run(Settings {
@@ -71,12 +72,26 @@ impl Application for Bfme2Manager {
                     }
                 }
                 Command::none()
-            }
+            },
             Message::InstallerPathUpdate(path) => {
                 self.installer.data.path = path;
                 Command::none()
+            },
+            Message::ExtractionProgressed(update) => {
+                self.installer.on_extraction_progressed(update);
+                Command::none()
             }
+
             _ => Command::none()
+        }
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        match self.installer.current_step {
+            InstallerStep::Install => {
+                self.installer.install().map(Message::ExtractionProgressed)
+            }
+            _ => Subscription::none()
         }
     }
 

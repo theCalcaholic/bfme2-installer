@@ -1,4 +1,5 @@
-use super::installer::InstallerStep;
+use super::installer::{InstallerStep, InstallationProgress};
+use super::extract;
 
 #[derive(Debug)]
 pub struct Installation {
@@ -18,5 +19,7 @@ pub enum Game {
 pub enum Message {
     StartInstallation(Game),
     InstallerNext(InstallerStep),
-    InstallerPathUpdate(String)
+    InstallerPathUpdate(String),
+    InstallerInstallUpdate((usize, InstallationProgress)),
+    ExtractionProgressed((usize, extract::Progress))
 }
