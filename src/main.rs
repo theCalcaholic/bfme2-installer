@@ -1,6 +1,7 @@
 mod installer;
 mod common;
 mod extract;
+mod checksums;
 
 use installer::{Installer, InstallerStep};
 use common::{Message, Game, Installation};
@@ -80,6 +81,10 @@ impl Application for Bfme2Manager {
             Message::ExtractionProgressed(update) => {
                 self.installer.on_extraction_progressed(update);
                 Command::none()
+            },
+            Message::ChecksumGenerationProgressed(update) => {
+                self.installer.on_checksum_progress(update);
+                Command::none()
             }
 
             _ => Command::none()
@@ -90,6 +95,9 @@ impl Application for Bfme2Manager {
         match self.installer.current_step {
             InstallerStep::Install => {
                 self.installer.install().map(Message::ExtractionProgressed)
+            },
+            InstallerStep::Validate => {
+                self.installer.generate_checksums().map(Message::ChecksumGenerationProgressed)
             }
             _ => Subscription::none()
         }

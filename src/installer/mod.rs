@@ -1,9 +1,12 @@
 use iced::{Column, Text, Element, Button, button, TextInput, text_input, Subscription, ProgressBar, progress_bar, Background, Color};
 use super::common::{Message, Game};
 use super::extract;
+use super::checksums;
 use std::hash::{Hash, Hasher};
 use std::collections::{HashMap, VecDeque};
-use std::fs::{File, read_link};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use iced::progress_bar::Style;
 use crate::extract::Progress;
@@ -30,10 +33,11 @@ impl InstallerStep {
 
     fn next(&mut self) -> InstallerStep {
         match self {
-            InstallerStep::Configuration => InstallerStep::Register,
-            InstallerStep::Register => InstallerStep::Download,
-            InstallerStep::Download => InstallerStep::Install,
-            InstallerStep::Install => InstallerStep::Validate,
+            InstallerStep::Configuration => InstallerStep::Download,
+            //InstallerStep::Download => InstallerStep::Install,
+            //InstallerStep::Install => InstallerStep::Register,
+            InstallerStep::Download => InstallerStep::Register,
+            InstallerStep::Register => InstallerStep::Validate,
             InstallerStep::Validate => InstallerStep::Inactive,
             _ => self.clone()
         }
@@ -65,8 +69,8 @@ pub struct Installer {
     pub data: InstallerData,
     button_states: [button::State; 1],
     path_input_state: text_input::State,
-    extraction_progress: f32,
-    extraction_file: String
+    progress: f32,
+    progress_message: String
 }
 
 
@@ -97,14 +101,15 @@ impl Installer {
             data: InstallerData::defaults(),
             button_states: [button::State::default()],
             path_input_state: text_input::State::default(),
-            extraction_progress: 0.0,
-            extraction_file: String::from("NONE")
+            progress: 0.0,
+            progress_message: String::from("NONE")
         }
     }
     pub fn view(&mut self) -> Element<Message> {
         match self.current_step {
             InstallerStep::Configuration => self.config_view(),
             InstallerStep::Install => self.install_view(),
+            InstallerStep::Validate => self.validate_view(),
             _ => self.default_view()
         }
     }
@@ -130,26 +135,63 @@ impl Installer {
         let mut extraction = extract::Extraction {
             id: 0,
             from: VecDeque::from(extraction_queue),
-            to: String::from("/home/tobias/projects/bfme2-installer/test")
+            to: String::from(&self.data.path)
         };
         iced::Subscription::from_recipe( extraction)
     }
 
     pub fn on_extraction_progressed(&mut self, update: (usize, extract::Progress)) {
-        match update.1 {
-            extract::Progress::Advanced(percentage, file_name) => {
-                self.extraction_progress = percentage;
-                self.extraction_file = file_name;
+        match update {
+            (_, extract::Progress::Advanced(percentage, file_name)) => {
+                self.progress = percentage;
+                self.progress_message = file_name;
             }
-            extract::Progress::Finished => {
-                self.extraction_progress = 100.0;
+            (_, extract::Progress::Finished) => {
+                self.progress = 100.0;
+                self.progress_message = String::from("")
             }
-            extract::Progress::Errored => {
-                self.extraction_progress = -100.0;
+            (_, extract::Progress::Errored) => {
+                self.progress = -100.0;
             }
             _ => {
-                    self.extraction_progress = 0.0;
+                    self.progress = 0.0;
             }
+        }
+    }
+
+    pub fn on_checksum_progress(&mut self, update: (usize, checksums::Progress)) {
+        match update {
+            (_, checksums::Progress::Generating(percentage)) => {
+                self.progress = percentage;
+                self.progress_message = String::from("")
+            },
+            (_, checksums::Progress::Finished) => {
+                self.progress = 100.0;
+                self.progress_message = String::from("")
+            },
+            (_, checksums::Progress::Errored) => {
+                self.progress = -100.0;
+                self.progress_message = String::from("")
+            }
+        }
+    }
+
+    pub fn generate_checksums(&self) -> iced::Subscription<(usize, checksums::Progress)> {
+        let mut checksum_generator = checksums::ChecksumGenerator{
+            id: 0,
+            path: String::from(&self.data.path)
+        };
+
+        iced::Subscription::from_recipe(checksum_generator)
+    }
+
+    fn get_checksum(&self) -> String {
+        let game_path = PathBuf::from(&self.data.path);
+
+
+        match checksums::calculate_hash(game_path.join("checksums.txt")) {
+            Ok(result) => result,
+            Err(e) => String::from("-unknown-")
         }
     }
 
@@ -168,24 +210,45 @@ impl Installer {
             .into()
     }
 
-    fn install_view(&mut self) -> Element<Message> {
-        println!("Progress: {}", self.extraction_progress);
-        let mut view = Column::new()
-            .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
-            .push(Text::new("Extracting..."))
-            .push(ProgressBar::new(0.0..=100.0, self.extraction_progress.abs())
-                .style(PbStyle{error: match self.extraction_progress {
+    fn progress_view<'a>(game: Game, progress: f32, title: &'a str, progress_message: &'a str) -> Column<'a, Message> {
+        println!("Progress: {}", progress);
+        Column::new()
+            .push(Text::new(format!("Installing {:?}", game)).size(20))
+            .push(Text::new(format!("{}...", title)))
+            .push(ProgressBar::new(0.0..=100.0, progress.abs())
+                .style(PbStyle{error: match progress {
                     -100.0 => true,
                     _ => false
                 }}))
-            .push(Text::new(&self.extraction_file));
-        if self.extraction_progress == 100.0 {
+            .push(Text::new(progress_message))
+    }
+
+    fn install_view(&mut self) -> Element<Message> {
+        let mut view = Self::progress_view(self.data.game.unwrap(),
+                                                       self.progress,
+                                                       "Extracting...",
+                                                       self.progress_message.as_str());
+        if self.progress == 100.0 {
             view = view.push(Button::new(&mut self.button_states[0],
-                                  Text::new("Next"))
+                                         Text::new("Next"))
                 .on_press(Message::InstallerNext(self.current_step.next())));
         }
 
-            view.into()
+        view.into()
+    }
+
+    fn validate_view(&mut self) -> Element<Message> {
+        let mut view = Self::progress_view(self.data.game.unwrap(),
+                                                       self.progress,
+                                                       "Validating...",
+                                                       self.progress_message.as_str());
+        if self.progress == 100.0 {
+            view = view.push(Text::new(format!("Your checksum: {}", self.get_checksum())))
+                .push(Button::new(&mut self.button_states[0],
+                                  Text::new("Next"))
+                    .on_press(Message::InstallerNext(self.current_step.next())));
+        }
+        view.into()
     }
 
     fn default_view(&mut self) -> Element<Message> {

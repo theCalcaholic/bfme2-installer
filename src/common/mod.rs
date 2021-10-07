@@ -1,5 +1,5 @@
 use super::installer::{InstallerStep, InstallationProgress};
-use super::extract;
+use super::{extract, checksums};
 
 #[derive(Debug)]
 pub struct Installation {
@@ -21,5 +21,6 @@ pub enum Message {
     InstallerNext(InstallerStep),
     InstallerPathUpdate(String),
     InstallerInstallUpdate((usize, InstallationProgress)),
-    ExtractionProgressed((usize, extract::Progress))
+    ExtractionProgressed((usize, extract::Progress)),
+    ChecksumGenerationProgressed((usize, checksums::Progress))
 }

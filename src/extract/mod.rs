@@ -25,19 +25,6 @@ pub struct Extraction<I> {
     pub to: String
 }
 
-fn archive_iter<'a>(from: PathBuf) -> Result<(Archive<GzDecoder<File>>, usize), String>
-{
-    let tar = File::open(&from).unwrap();
-    let mut archive = Archive::new(GzDecoder::new(tar));
-    let tar2 = File::open(from).unwrap();
-    let count = Archive::new(GzDecoder::new(tar2)).entries().unwrap().count();
-    //let entries = archive.entries().unwrap();
-    Ok((archive, count))
-
-    // let entry_count_total = archive.entries().unwrap().count();
-    // Ok((archive.entries().unwrap(), entry_count_total))
-}
-
 impl<H, I, T> iced_native::subscription::Recipe<H, I> for Extraction<T>
 where
     T: 'static + Hash + Copy + Send,
@@ -51,7 +38,7 @@ where
         self.id.hash(state);
     }
 
-    fn stream(self: Box<Self>, input: iced_futures::BoxStream<I>)
+    fn stream(self: Box<Self>, _input: iced_futures::BoxStream<I>)
         -> iced_futures::BoxStream<Self::Output>
     {
         let id = self.id;
