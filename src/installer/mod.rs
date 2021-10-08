@@ -16,6 +16,7 @@ use handlebars::{Handlebars, RenderError};
 use tempfile::{NamedTempFile, tempfile};
 use winreg::{RegValue, RegKey};
 use winreg::enums::*;
+use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstallerStep {
@@ -54,17 +55,17 @@ impl InstallerStep {
 pub struct InstallerData {
     pub game: Option<Game>,
     pub path: String,
-    pub checksum: Option<String>,
-    pub ergc: Option<String>
+    pub checksum: String,
+    pub ergc: String
 }
 
 impl InstallerData {
     fn defaults() -> InstallerData {
         return InstallerData {
             game: None,
-            path: String::from(""),
-            checksum: None,
-            ergc: None
+            path: String::default(),
+            checksum: String::default(),
+            ergc: String::default()
         }
     }
 }
@@ -75,6 +76,7 @@ pub struct Installer {
     pub data: InstallerData,
     button_states: [button::State; 1],
     path_input_state: text_input::State,
+    ergc_input_state: text_input::State,
     progress: f32,
     progress_message: String
 }
@@ -112,6 +114,7 @@ impl Installer {
             data: InstallerData::defaults(),
             button_states: [button::State::default()],
             path_input_state: text_input::State::default(),
+            ergc_input_state: text_input::State::default(),
             progress: 0.0,
             progress_message: String::from("NONE")
         }
@@ -180,8 +183,8 @@ impl Installer {
                 self.progress = 100.0;
                 self.progress_message = String::from("");
                 self.data.checksum = match self.get_checksum() {
-                    Ok(result) => Some(result),
-                    Err(e) => None
+                    Ok(result) => result,
+                    Err(e) => String::default()
                 };
             },
             (_, checksums::Progress::Errored) => {
@@ -253,17 +256,23 @@ impl Installer {
     }
 
     fn config_view(&mut self) -> Element<Message>{
-        Column::new()
+        let mut view = Column::new()
             .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
             .push(Text::new("Configuration"))
             .push(TextInput::new(&mut self.path_input_state,
                                  "install path", &self.data.path,
-                                 Message::InstallerPathUpdate))
-            .push(Text::new("Patch Level:"))
-            .push(Button::new(&mut self.button_states[0],
-                              Text::new("Next"))
-                .on_press(Message::InstallerNext(self.current_step.next())))
-            .push(Text::new(format!("data:\n{:?}", self.data)))
+                                 Message::InstallerConfigUpdate))
+            .push(TextInput::new(&mut self.ergc_input_state,
+            "activation code", &self.data.ergc, Message::InstallerConfigUpdate))
+            .push(Text::new("You can get a valid activation key from here: https://www.youtube.com/watch?v=eWg680bt_es"));
+            if PathBuf::from(&self.data.path).is_dir()
+                && Regex::new(r"^([A-Z0-9]{4}-?){5}$")
+                .is_match(self.data.ergc.replace("-", "").to_uppercase()) {
+                view = view.push(Button::new(&mut self.button_states[0],
+                                      Text::new("Next"))
+                    .on_press(Message::InstallerNext(self.current_step.next())))
+            }
+            view.push(Text::new(format!("data:\n{:?}", self.data)))
             .into()
     }
 

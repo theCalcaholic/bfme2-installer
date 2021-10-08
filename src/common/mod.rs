@@ -19,7 +19,7 @@ pub enum Game {
 pub enum Message {
     StartInstallation(Game),
     InstallerNext(InstallerStep),
-    InstallerPathUpdate(String),
+    InstallerConfigUpdate(String),
     InstallerInstallUpdate((usize, InstallationProgress)),
     ExtractionProgressed((usize, extract::Progress)),
     ChecksumGenerationProgressed((usize, checksums::Progress))

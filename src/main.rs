@@ -75,7 +75,7 @@ impl Application for Bfme2Manager {
                 }
                 Command::none()
             },
-            Message::InstallerPathUpdate(path) => {
+            Message::InstallerConfigUpdate(path) => {
                 self.installer.data.path = path;
                 Command::none()
             },
