@@ -2,9 +2,11 @@ use iced::{Column, Text, Element, Button, button, TextInput, text_input, Subscri
 use super::common::{Message, Game};
 use super::extract;
 use super::checksums;
+use super::reg;
 use std::hash::{Hash, Hasher};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
+use std::io;
 use std::io::{Read, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,8 @@ use iced::progress_bar::Style;
 use crate::extract::Progress;
 use handlebars::{Handlebars, RenderError};
 use tempfile::{NamedTempFile, tempfile};
+use winreg::{RegValue, RegKey};
+use winreg::enums::*;
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstallerStep {
@@ -51,7 +55,7 @@ pub struct InstallerData {
     pub game: Option<Game>,
     pub path: String,
     pub checksum: Option<String>,
-    pub egrc: Option<String>
+    pub ergc: Option<String>
 }
 
 impl InstallerData {
@@ -60,7 +64,7 @@ impl InstallerData {
             game: None,
             path: String::from(""),
             checksum: None,
-            egrc: None
+            ergc: None
         }
     }
 }
@@ -204,35 +208,48 @@ impl Installer {
     }
 
     fn register(data: &InstallerData) -> Result<(), String> {
-        let (template_name, template_path) = match data.game {
-            Some(Game::BFME2) => ("bfme2.rs", "../reg/bfme2.rs"),
-            Some(Game::ROTWK) => ("rotwk.rs", "../reg/rotwk.rs"),
-            None => panic!("Unexpected error (no game selected)!")
-        };
-        let mut handlebars = Handlebars::new();
-        handlebars.register_template_file(template_name, template_path).unwrap();
-        let mut output_file = NamedTempFile::new()?;
-        let mut fh = output_file.reopen()?;
         let canon_path = PathBuf::from(data.path.as_str())
             .canonicalize()
             .unwrap()
             .to_str()
             .unwrap()
             .to_owned();
-        let data = RegRenderData {
-            install_path: canon_path.clone(),
-            install_path_shorthand: canon_path,
-            egrc: None,
-        };
-        match handlebars.render_to_write(template_name, &data, fh) {
-            Ok(()) => {
+        let mut reg_data = BTreeMap::new();
+        reg_data.insert("install_path", canon_path.clone());
+        reg_data.insert("install_path_shorthand", canon_path);
+        reg_data.insert("ergc", data.ergc.clone().unwrap());
+        let mut handlebars = Handlebars::new();
 
-                Ok(())
-            },
-            Err(e) => {
-                Err(e.to_string())
-            }
+
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if reg::BFME2.keys.get("HKLM").expect("Unexpected Error!")
+            .entries()
+            .map(|(key, entries)| {
+            entries.entries().map(|(value_name, value)| {
+                match value {
+                    reg::RegValue::Str(val) => {
+                        println!("Write {} to {}", val, key);
+                        hklm.create_subkey(key).unwrap().0.set_value(value_name, val)
+                    },
+                    reg::RegValue::UInt(val) => {
+                        println!("Write {} to {}", val, key);
+                        hklm.create_subkey(key).unwrap().0.set_value(value_name, val)
+                    },
+                    reg::RegValue::Template(tmpl) => {
+                        let template_name = &*format!("HKLM\\{}\\{}", key, value_name);
+                        handlebars.register_template_string(template_name, tmpl);
+                        let val = handlebars.render(template_name, &reg_data).unwrap();
+                        println!("Write {} to {}", val, key);
+                        hklm.create_subkey(key).unwrap().0.set_value(value_name, &val)
+                    },
+                }
+            }).all(|result| result.is_ok())
+        }).all(|result| result) {
+            Ok(())
+        } else {
+            Err("An error occurred".parse().unwrap())
         }
+
     }
 
     fn config_view(&mut self) -> Element<Message>{
@@ -284,7 +301,7 @@ impl Installer {
                                                        self.progress_message.as_str());
         if self.data.checksum.is_some() {
             view = view.push(
-                Text::new(format!("Your checksum: {}", self.data.checksum.unwrap())))
+                Text::new(format!("Your checksum: {}", self.data.checksum.clone().unwrap())))
                 .push(Button::new(&mut self.button_states[0],
                                   Text::new("Next"))
                     .on_press(Message::InstallerNext(self.current_step.next())));
