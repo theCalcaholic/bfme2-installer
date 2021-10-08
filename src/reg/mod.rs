@@ -33,7 +33,7 @@ static BFME2_0: RegEntryMap = phf_map! {
     "InstallPath" => RegValue::Template("{{ install_path }}"),
     "MapPackVersion" => RegValue::UInt(00010000),
     "UseLocalUserMaps" => RegValue::UInt(00000000),
-    "UserDataLeafName" => RegValue::Str("My Battle for Middle-earth(tm) II Files"),
+    "UserDataLeafName" => RegValue::Str("BFME_{{ checksum }}"),
     "Version" => RegValue::UInt(00010000),
     "ergc" => RegValue::Template("{{ ergc }}")
 };
@@ -75,39 +75,49 @@ pub static BFME2: Regentries = Regentries {
     keys: BFME2_KEYS
 };
 
-// pub const ROTWK: Regentries = Regentries {
-//     keys: [
-//         ("HKLM", [
-//             ("SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king", [
-//                 ("Language", RegValue::Str(*"english")),
-//                 ("InstallPath", RegValue::Str(*"{{ install_path }}")),
-//                 ("MapPackVersion", RegValue::UInt(00020000)),
-//                 ("UseLocalUserMaps", RegValue::UInt(00000000)),
-//                 ("UserDataLeafName", RegValue::Str(*"My The Lord of the Rings, The Rise of the Witch-king Files")),
-//                 ("Version", RegValue::UInt(00020000)),
-//                 ("ergc", RegValue::Template(*"{{ ergc }}"))
-//             ].iter().cloned().collect()),
-//             ("SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\1.0", [
-//                 ("DisplayName", RegValue::Str(*"The Lord of the Rings, The Rise of the Witch-king")),
-//                 ("Language", RegValue::UInt(00000013)),
-//                 ("LanguageName", RegValue::Str(*"English UK"))
-//             ].iter().cloned().collect()),
-//             ("SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king", [
-//                 ("CacheSize", RegValue::Str(*"3139187712")),
-//                 ("CD Drive", RegValue::Str(*"D:\\")),
-//                 ("DisplayName", RegValue::Str(*"The Lord of the Rings, The Rise of the Witch-king")),
-//                 ("Folder", RegValue::Str(*"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Electronic Arts\\ROTWK\\")),
-//                 ("Install Dir", RegValue::Template(*"{{ install_path_shorthand }}")),
-//                 ("Installed From", RegValue::Str(*"D:\\")),
-//                 ("Language", RegValue::Str(*"English UK")),
-//                 ("Locale", RegValue::Str(*"en_uk")),
-//                 ("Patch URL", RegValue::Str(*"http://transtest.ea.com/Electronic Arts/The Battle for Middle-earth 2/NorthAmerica")),
-//                 ("Product GUID", RegValue::Str(*"{B931FB80-537A-4600-00AD-AC5DEDB6C25B}")),
-//                 ("Region", RegValue::Str(*"NorthAmerica")),
-//                 ("Registration", RegValue::Str(*"SOFTWARE\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\ergc")),
-//                 ("Suppression Exe", RegValue::Str(*"rtsi.exe")),
-//                 ("SwapSize", RegValue::Str(*"0"))
-//             ].iter().cloned().collect())
-//         ].iter().cloned().collect())
-//     ].iter().cloned().collect()
-// };
+static ROTWK_0: RegEntryMap = phf_map! {
+    "Language" => RegValue::Str(*"english"),
+    "InstallPath" => RegValue::Str(*"{{ install_path }}"),
+    "MapPackVersion" => RegValue::UInt(00020000),
+    "UseLocalUserMaps" => RegValue::UInt(00000000),
+    "UserDataLeafName" => RegValue::Str(*"My The Lord of the Rings, The Rise of the Witch-king Files"),
+    "Version" => RegValue::UInt(00020000),
+    "ergc" => RegValue::Template(*"{{ ergc }}")
+};
+
+static ROTWK_1: RegEntryMap = phf_map! {
+    "DisplayName" => RegValue::Str(*"The Lord of the Rings, The Rise of the Witch-king"),
+    "Language" => RegValue::UInt(00000013),
+    "LanguageName" => RegValue::Str(*"English UK")
+};
+
+static ROTWK_2: RegEntryMap = phf_map! {
+    "CacheSize" => RegValue::Str(*"3139187712"),
+    "CD Drive" => RegValue::Str(*"D:\\"),
+    "DisplayName" => RegValue::Str(*"The Lord of the Rings, The Rise of the Witch-king"),
+    "Folder" => RegValue::Str(*"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Electronic Arts\\ROTWK\\"),
+    "Install Dir" => RegValue::Template(*"{{ install_path_shorthand }}"),
+    "Installed From" => RegValue::Str(*"D:\\"),
+    "Language" => RegValue::Str(*"English UK"),
+    "Locale" => RegValue::Str(*"en_uk"),
+    "Patch URL" => RegValue::Str(*"http://transtest.ea.com/Electronic Arts/The Battle for Middle-earth 2/NorthAmerica"),
+    "Product GUID" => RegValue::Str(*"{B931FB80-537A-4600-00AD-AC5DEDB6C25B}"),
+    "Region" => RegValue::Str(*"NorthAmerica"),
+    "Registration" => RegValue::Str(*"SOFTWARE\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\ergc"),
+    "Suppression Exe" => RegValue::Str(*"rtsi.exe"),
+    "SwapSize" => RegValue::Str(*"0")
+};
+
+static ROTWK_INNER: &phf::Map<&'static str, &'static RegEntryMap> = &phf_map! {
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => ROTWK_0,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\1.0" => ROTWK_1,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => ROTWK_2
+};
+
+static ROTWK_KEYS: &phf::Map<&'static str, &phf::Map<&'static str, &'static RegEntryMap>> = &phf_map! {
+    "HKLM" => ROTWK_INNER
+};
+
+pub static ROTWK: Regentries = Regentries {
+    keys: BFME2_KEYS
+};
