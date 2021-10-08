@@ -10,6 +10,8 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use iced::progress_bar::Style;
 use crate::extract::Progress;
+use handlebars::{Handlebars, RenderError};
+use tempfile::{NamedTempFile, tempfile};
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstallerStep {
@@ -33,12 +35,12 @@ impl InstallerStep {
 
     fn next(&mut self) -> InstallerStep {
         match self {
-            InstallerStep::Configuration => InstallerStep::Download,
-            //InstallerStep::Download => InstallerStep::Install,
-            //InstallerStep::Install => InstallerStep::Register,
-            InstallerStep::Download => InstallerStep::Register,
-            InstallerStep::Register => InstallerStep::Validate,
-            InstallerStep::Validate => InstallerStep::Inactive,
+            //InstallerStep::Configuration => InstallerStep::Download,
+            InstallerStep::Configuration => InstallerStep::Register,
+            InstallerStep::Download => InstallerStep::Install,
+            InstallerStep::Install => InstallerStep::Register,
+            InstallerStep::Validate => InstallerStep::Register,
+            InstallerStep::Register => InstallerStep::Inactive,
             _ => self.clone()
         }
     }
@@ -73,6 +75,11 @@ pub struct Installer {
     progress_message: String
 }
 
+struct RegRenderData {
+    pub install_path: String,
+    pub install_path_shorthand: String,
+    pub egrc: Option<String>
+}
 
 
 struct PbStyle {
@@ -167,7 +174,11 @@ impl Installer {
             },
             (_, checksums::Progress::Finished) => {
                 self.progress = 100.0;
-                self.progress_message = String::from("")
+                self.progress_message = String::from("");
+                self.data.checksum = match self.get_checksum() {
+                    Ok(result) => Some(result),
+                    Err(e) => None
+                };
             },
             (_, checksums::Progress::Errored) => {
                 self.progress = -100.0;
@@ -185,13 +196,42 @@ impl Installer {
         iced::Subscription::from_recipe(checksum_generator)
     }
 
-    fn get_checksum(&self) -> String {
+    fn get_checksum(&self) -> Result<String, String> {
         let game_path = PathBuf::from(&self.data.path);
 
 
-        match checksums::calculate_hash(game_path.join("checksums.txt")) {
-            Ok(result) => result,
-            Err(e) => String::from("-unknown-")
+        checksums::calculate_hash(game_path.join("checksums.txt"))
+    }
+
+    fn register(data: &InstallerData) -> Result<(), String> {
+        let (template_name, template_path) = match data.game {
+            Some(Game::BFME2) => ("bfme2.rs", "../reg/bfme2.rs"),
+            Some(Game::ROTWK) => ("rotwk.rs", "../reg/rotwk.rs"),
+            None => panic!("Unexpected error (no game selected)!")
+        };
+        let mut handlebars = Handlebars::new();
+        handlebars.register_template_file(template_name, template_path).unwrap();
+        let mut output_file = NamedTempFile::new()?;
+        let mut fh = output_file.reopen()?;
+        let canon_path = PathBuf::from(data.path.as_str())
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let data = RegRenderData {
+            install_path: canon_path.clone(),
+            install_path_shorthand: canon_path,
+            egrc: None,
+        };
+        match handlebars.render_to_write(template_name, &data, fh) {
+            Ok(()) => {
+
+                Ok(())
+            },
+            Err(e) => {
+                Err(e.to_string())
+            }
         }
     }
 
@@ -242,8 +282,9 @@ impl Installer {
                                                        self.progress,
                                                        "Validating...",
                                                        self.progress_message.as_str());
-        if self.progress == 100.0 {
-            view = view.push(Text::new(format!("Your checksum: {}", self.get_checksum())))
+        if self.data.checksum.is_some() {
+            view = view.push(
+                Text::new(format!("Your checksum: {}", self.data.checksum.unwrap())))
                 .push(Button::new(&mut self.button_states[0],
                                   Text::new("Next"))
                     .on_press(Message::InstallerNext(self.current_step.next())));

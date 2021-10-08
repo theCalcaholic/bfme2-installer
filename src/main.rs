@@ -2,6 +2,7 @@ mod installer;
 mod common;
 mod extract;
 mod checksums;
+mod reg;
 
 use installer::{Installer, InstallerStep};
 use common::{Message, Game, Installation};
