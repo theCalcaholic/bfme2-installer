@@ -5,7 +5,7 @@ use super::checksums;
 use super::reg;
 use std::hash::{Hash, Hasher};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, create_dir_all};
 use std::io;
 use std::io::{Read, Write};
 use std::ops::Deref;
@@ -58,6 +58,7 @@ pub struct InstallerData {
     pub game: Option<Game>,
     pub path: String,
     pub userdata_path: String,
+    pub data_path: String,
     pub checksum: String,
     pub ergc: String
 }
@@ -68,6 +69,7 @@ impl InstallerData {
             game: None,
             path: String::default(),
             userdata_path: String::default(),
+            data_path: String::default(),
             checksum: String::default(),
             ergc: String::default()
         }
@@ -79,6 +81,7 @@ pub struct Installer {
     pub current_step: InstallerStep,
     pub data: InstallerData,
     button_states: [button::State; 1],
+    data_path_input_state: text_input::State,
     path_input_state: text_input::State,
     ergc_input_state: text_input::State,
     progress: f32,
@@ -117,6 +120,7 @@ impl Installer {
             current_step: InstallerStep::Inactive,
             data: InstallerData::defaults(),
             button_states: [button::State::default()],
+            data_path_input_state: text_input::State::default(),
             path_input_state: text_input::State::default(),
             ergc_input_state: text_input::State::default(),
             progress: 0.0,
@@ -144,7 +148,7 @@ impl Installer {
             Some(Game::ROTWK) => "ROTWK",
             None => panic!("No game selected! Abort...")
         };
-        let data_path = &self.data.data_dir;
+        let data_path = &self.data.data_path;
         let extraction_queue = (0..30)
             .map(|n| format!("{}/{}_{}.tar.gz", data_path, game_str, n))
             .filter(|p| Path::new(p).exists())
@@ -165,8 +169,10 @@ impl Installer {
             Some(Game::ROTWK) => "ROTWK",
             None => panic!("No game selected! Abort...")
         };
-        let data_path = &self.data.data_dir;
+        let data_path = &self.data.data_path;
         let extraction_queue = vec![format!("{}/userdata.{}.tar.gz", data_path, game_str.to_lowercase())];
+
+        create_dir_all(&self.data.userdata_path);
 
         let mut extraction = extract::Extraction {
             id: 0,
@@ -199,16 +205,16 @@ impl Installer {
         match update {
             (_, checksums::Progress::Generating(percentage)) => {
                 self.progress = percentage;
-                self.progress_message = String::from("")
+                self.progress_message = String::from("");
             },
             (_, checksums::Progress::Finished) => {
                 self.progress = 100.0;
                 self.progress_message = String::from("");
-                self.calculate_checksum()
+                self.calculate_checksum();
             },
             (_, checksums::Progress::Errored) => {
                 self.progress = -100.0;
-                self.progress_message = String::from("")
+                self.progress_message = String::from("");
             }
         }
     }
@@ -224,6 +230,12 @@ impl Installer {
 
     fn calculate_checksum(&mut self) -> Result<(), ()> {
         let game_path = PathBuf::from(&self.data.path);
+
+        let game_str = match &self.data.game {
+            Some(Game::BFME2) => "bfme2",
+            Some(Game::ROTWK) => "rotwk",
+            None => panic!("Game not configured!")
+        };
 
 
         self.data.checksum = match checksums::calculate_hash(game_path.join("checksums.txt")) {
@@ -260,7 +272,7 @@ impl Installer {
         let mut reg_data = BTreeMap::new();
         reg_data.insert("install_path", canon_path.clone());
         reg_data.insert("install_path_shorthand", canon_path);
-        reg_data.insert("ergc", data.ergc.clone().unwrap());
+        reg_data.insert("ergc", data.ergc.clone());
         let mut handlebars = Handlebars::new();
 
 
@@ -299,15 +311,24 @@ impl Installer {
         let mut view = Column::new()
             .push(Text::new(format!("Installing {:?}", self.data.game.unwrap())).size(20))
             .push(Text::new("Configuration"))
+            .push(TextInput::new(&mut self.data_path_input_state, "data path", 
+                                 &self.data.data_path, Message::InstallerConfigUpdate))
             .push(TextInput::new(&mut self.path_input_state,
                                  "install path", &self.data.path,
                                  Message::InstallerConfigUpdate))
             .push(TextInput::new(&mut self.ergc_input_state,
             "activation code", &self.data.ergc, Message::InstallerConfigUpdate))
             .push(Text::new("You can get a valid activation key from here: https://www.youtube.com/watch?v=eWg680bt_es"));
+            let game_str = match self.data.game { 
+                Some(Game::BFME2) => "BFME2", 
+                Some(Game::ROTWK) => "ROTWK",
+                None => panic!("Game not configured!")
+            };
             if PathBuf::from(&self.data.path).is_dir()
-                && Regex::new(r"^([A-Z0-9]{4}-?){5}$")
-                .is_match(self.data.ergc.replace("-", "").to_uppercase()) {
+                && PathBuf::from(&self.data.data_path).is_dir()
+                && PathBuf::from(&self.data.data_path).join(format!("{}_0.tar.gz", game_str)).exists()
+                && Regex::new(r"^([A-Z0-9]{4}-?){5}$").unwrap()
+                .is_match(self.data.ergc.replace("-", "").to_uppercase().as_str()) {
                 view = view.push(Button::new(&mut self.button_states[0],
                                       Text::new("Next"))
                     .on_press(Message::InstallerNext(self.current_step.next())))
@@ -360,9 +381,9 @@ impl Installer {
                                                        validation_progress,
                                                        "Validating...",
                                                        validation_message);
-        if self.data.checksum.is_some() {
+        if !self.data.checksum.is_empty() {
             view = view.push(
-                Text::new(format!("Your checksum: {}", self.data.checksum.clone().unwrap())));
+                Text::new(format!("Your checksum: {}", self.data.checksum.clone())));
             if userdata_progress > 0.0 {
                 view = view.push(Text::new("Setting up APPDATA..."))
                     .push(ProgressBar::new(0.0..=100.0, userdata_progress.abs())
