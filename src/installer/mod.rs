@@ -55,6 +55,7 @@ impl InstallerStep {
 pub struct InstallerData {
     pub game: Option<Game>,
     pub path: String,
+    pub userdata_path: String,
     pub checksum: String,
     pub ergc: String
 }
@@ -64,6 +65,7 @@ impl InstallerData {
         return InstallerData {
             game: None,
             path: String::default(),
+            userdata_path: String::default(),
             checksum: String::default(),
             ergc: String::default()
         }
@@ -139,7 +141,7 @@ impl Installer {
             Some(Game::ROTWK) => "ROTWK",
             None => panic!("No game selected! Abort...")
         };
-        let data_path = "/mnt/Games/lan/bfme_install_export";
+        let data_path = &self.data.data_dir;
         let extraction_queue = (0..30)
             .map(|n| format!("{}/{}_{}.tar.gz", data_path, game_str, n))
             .filter(|p| Path::new(p).exists())
@@ -150,6 +152,23 @@ impl Installer {
             id: 0,
             from: VecDeque::from(extraction_queue),
             to: String::from(&self.data.path)
+        };
+        iced::Subscription::from_recipe( extraction)
+    }
+
+    pub fn install_userdata(&self) -> iced::Subscription<(usize, extract::Progress)> {
+        let game_str = match self.data.game {
+            Some(Game::BFME2) => "BFME2",
+            Some(Game::ROTWK) => "ROTWK",
+            None => panic!("No game selected! Abort...")
+        };
+        let data_path = &self.data.data_dir;
+        let extraction_queue = vec![format!("{}/userdata.{}.tar.gz", data_path, game_str.to_lowercase())];
+
+        let mut extraction = extract::Extraction {
+            id: 0,
+            from: VecDeque::from(extraction_queue),
+            to: String::from(&self.data.userdata_path)
         };
         iced::Subscription::from_recipe( extraction)
     }
@@ -182,10 +201,7 @@ impl Installer {
             (_, checksums::Progress::Finished) => {
                 self.progress = 100.0;
                 self.progress_message = String::from("");
-                self.data.checksum = match self.get_checksum() {
-                    Ok(result) => result,
-                    Err(e) => String::default()
-                };
+                self.calculate_checksum()
             },
             (_, checksums::Progress::Errored) => {
                 self.progress = -100.0;
@@ -203,11 +219,32 @@ impl Installer {
         iced::Subscription::from_recipe(checksum_generator)
     }
 
-    fn get_checksum(&self) -> Result<String, String> {
+    fn calculate_checksum(&mut self) -> Result<(), ()> {
         let game_path = PathBuf::from(&self.data.path);
 
 
-        checksums::calculate_hash(game_path.join("checksums.txt"))
+        self.data.checksum = match checksums::calculate_hash(game_path.join("checksums.txt")) {
+            Ok(result) => {
+                result
+            },
+            Err(e) => {
+                String::default()
+            }
+        };
+
+        if ! self.data.checksum.is_empty() {
+            let mut userdata_path = dirs::home_dir().unwrap();
+            userdata_path.push("AppData");
+            userdata_path.push("Roaming");
+            userdata_path.push(format!("{}_{}", game_str, &self.data.checksum));
+            self.data.userdata_path = userdata_path.canonicalize()
+                .unwrap().to_str()
+                .unwrap().parse()
+                .unwrap();
+            return Ok(())
+        }
+
+        return Err(())
     }
 
     fn register(data: &InstallerData) -> Result<(), String> {
@@ -304,16 +341,39 @@ impl Installer {
     }
 
     fn validate_view(&mut self) -> Element<Message> {
+        let validation_progress = match self.data.checksum.is_empty() {
+            true => self.progress,
+            false => 100.0
+        };
+        let validation_message = match self.data.checksum.is_empty() {
+            true => self.progress_message.as_str(),
+            false => ""
+        };
+        let userdata_progress = match self.data.checksum.is_empty() {
+            true => 0.0,
+            false => self.progress
+        };
         let mut view = Self::progress_view(self.data.game.unwrap(),
-                                                       self.progress,
+                                                       validation_progress,
                                                        "Validating...",
-                                                       self.progress_message.as_str());
+                                                       validation_message);
         if self.data.checksum.is_some() {
             view = view.push(
-                Text::new(format!("Your checksum: {}", self.data.checksum.clone().unwrap())))
-                .push(Button::new(&mut self.button_states[0],
-                                  Text::new("Next"))
+                Text::new(format!("Your checksum: {}", self.data.checksum.clone().unwrap())));
+            if userdata_progress > 0.0 {
+                view = view.push(Text::new("Setting up APPDATA..."))
+                    .push(ProgressBar::new(0.0..=100.0, userdata_progress.abs())
+                        .style(PbStyle{error: match userdata_progress {
+                            -100.0 => true,
+                            _ => false
+                        }}))
+                    .push(Text::new(self.progress_message.as_str()));
+            }
+            if userdata_progress == 100.0 {
+                view = view.push(Button::new(&mut self.button_states[0],
+                                      Text::new("Next"))
                     .on_press(Message::InstallerNext(self.current_step.next())));
+            }
         }
         view.into()
     }
