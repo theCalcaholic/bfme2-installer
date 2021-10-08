@@ -99,6 +99,9 @@ impl Application for Bfme2Manager {
             },
             InstallerStep::Validate => {
                 self.installer.generate_checksums().map(Message::ChecksumGenerationProgressed)
+            },
+            InstallerStep::UserData => {
+                self.installer.install_userdata().map(Message::ExtractionProgressed)
             }
             _ => Subscription::none()
         }

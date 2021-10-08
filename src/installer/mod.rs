@@ -25,7 +25,8 @@ pub enum InstallerStep {
     Register,
     Download,
     Install,
-    Validate
+    Validate,
+    UserData
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,8 +44,9 @@ impl InstallerStep {
             //InstallerStep::Configuration => InstallerStep::Download,
             InstallerStep::Configuration => InstallerStep::Register,
             InstallerStep::Download => InstallerStep::Install,
-            InstallerStep::Install => InstallerStep::Register,
-            InstallerStep::Validate => InstallerStep::Register,
+            InstallerStep::Install => InstallerStep::Validate,
+            InstallerStep::Validate => InstallerStep::UserData,
+            InstallerStep::UserData => InstallerStep::Register,
             InstallerStep::Register => InstallerStep::Inactive,
             _ => self.clone()
         }
@@ -126,6 +128,7 @@ impl Installer {
             InstallerStep::Configuration => self.config_view(),
             InstallerStep::Install => self.install_view(),
             InstallerStep::Validate => self.validate_view(),
+            InstallerStep::UserData => self.validate_view(),
             _ => self.default_view()
         }
     }
