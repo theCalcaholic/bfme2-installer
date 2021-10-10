@@ -1,4 +1,7 @@
 use phf::phf_map;
+use winreg;
+use winreg::enums::HKEY_LOCAL_MACHINE;
+use winreg::types::FromRegValue;
 
 macro_rules! hashmap {
     ($( $key: expr => $val: expr ),*) => {{
@@ -28,14 +31,17 @@ pub(crate) enum RegValue {
 
 type RegEntryMap = phf::Map<&'static str, RegValue>;
 
+static ERGC: RegEntryMap = phf_map! {
+    "" => RegValue::Template("{{ ergc }}")
+};
+
 static BFME2_0: RegEntryMap = phf_map! {
     "Language" => RegValue::Str("english"),
     "InstallPath" => RegValue::Template("{{ install_path }}"),
     "MapPackVersion" => RegValue::UInt(00010000),
     "UseLocalUserMaps" => RegValue::UInt(00000000),
-    "UserDataLeafName" => RegValue::Str("BFME_{{ checksum }}"),
+    "UserDataLeafName" => RegValue::Template("bfme2_{{ checksum }}"),
     "Version" => RegValue::UInt(00010000),
-    "ergc" => RegValue::Template("{{ ergc }}")
 };
 
 static BFME2_1: RegEntryMap = phf_map! {
@@ -61,10 +67,26 @@ static BFME2_2: RegEntryMap = phf_map! {
     "SwapSize" => RegValue::Str("0")
 };
 
+static BFME2_3: RegEntryMap = phf_map! {
+    "Game Registry" => RegValue::Str("SOFTWARE\\Electronic Arts\\The Battle for Middle-earth II"),
+    "Restart" => RegValue::UInt(00000000),
+    "DirectX Installed" => RegValue::UInt(00000000),
+    "Installed" => RegValue::UInt(00000001),
+    "" => RegValue::Template("{{ install_path }}\\lotrbfme2.exe"),
+    "Path" => RegValue::Template("{{ install_path }}")
+};
+
+static BFME2_4: RegEntryMap = phf_map! {
+    "checksum" => RegValue::Template("{{ checksum }}")
+};
+
 static BFME2_INNER: &phf::Map<&'static str, &'static RegEntryMap> = &phf_map! {
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Battle for Middle-earth II" => &BFME2_0,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Battle for Middle-earth II\\ergc" => &ERGC,
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Battle for Middle-earth II\\1.0" => &BFME2_1,
-    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Battle for Middle-earth II" => &BFME2_2
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Battle for Middle-earth II" => &BFME2_2,
+    "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\lotrbfme2.exe" => &BFME2_3,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\BFME2 Installer\\BFME2" => &BFME2_4
 };
 
 static BFME2_KEYS: &phf::Map<&'static str, &phf::Map<&'static str, &'static RegEntryMap>> = &phf_map! {
@@ -77,12 +99,11 @@ pub static BFME2: Regentries = Regentries {
 
 static ROTWK_0: RegEntryMap = phf_map! {
     "Language" => RegValue::Str("english"),
-    "InstallPath" => RegValue::Str("{{ install_path }}"),
+    "InstallPath" => RegValue::Template("{{ install_path }}"),
     "MapPackVersion" => RegValue::UInt(00020000),
     "UseLocalUserMaps" => RegValue::UInt(00000000),
-    "UserDataLeafName" => RegValue::Str("My The Lord of the Rings, The Rise of the Witch-king Files"),
-    "Version" => RegValue::UInt(00020000),
-    "ergc" => RegValue::Template("{{ ergc }}")
+    "UserDataLeafName" => RegValue::Template("rotwk_{{ checksum }}"),
+    "Version" => RegValue::UInt(00020000)
 };
 
 static ROTWK_1: RegEntryMap = phf_map! {
@@ -108,10 +129,16 @@ static ROTWK_2: RegEntryMap = phf_map! {
     "SwapSize" => RegValue::Str("0")
 };
 
+static ROTWK_3: RegEntryMap = phf_map! {
+    "checksum" => RegValue::Template("{{ checksum }}")
+};
+
 static ROTWK_INNER: &phf::Map<&'static str, &'static RegEntryMap> = &phf_map! {
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => &ROTWK_0,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\ergc" => &ERGC,
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\1.0" => &ROTWK_1,
-    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => &ROTWK_2
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => &ROTWK_2,
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\BFME2 Installer\\ROTWK" => &ROTWK_3
 };
 
 static ROTWK_KEYS: &phf::Map<&'static str, &phf::Map<&'static str, &'static RegEntryMap>> = &phf_map! {
@@ -119,5 +146,16 @@ static ROTWK_KEYS: &phf::Map<&'static str, &phf::Map<&'static str, &'static RegE
 };
 
 pub static ROTWK: Regentries = Regentries {
-    keys: BFME2_KEYS
+    keys: ROTWK_KEYS
 };
+
+
+pub fn get_reg_value<T: FromRegValue>(root: winreg::HKEY, path: &str, name: &str) -> iced::futures::io::Result<T> {
+    let hklm = winreg::RegKey::predef(root);
+    match hklm.open_subkey(path) {
+        Ok(reg_key) => {
+            reg_key.get_value(name)
+        },
+        Err(e) => Err(e)
+    }
+}

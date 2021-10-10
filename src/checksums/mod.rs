@@ -105,6 +105,17 @@ impl<H, I, T> iced_native::subscription::Recipe<H, I> for ChecksumGenerator<T>
                         match file_queue.pop_front() {
                             Some(file_path) => {
                                 println!("Calculating md5 sum for {}", file_path);
+                                if file_path.ends_with("checksums.txt") {
+                                    return Some((
+                                        (id, Progress::Generating((count + 1) as f32 * 100.0 / (total as f32))),
+                                        ChecksumState::Generating(
+                                            install_path,
+                                            checksums,
+                                            file_queue,
+                                            count + 1,
+                                            total)
+                                    ));
+                                }
                                 match calculate_hash(PathBuf::from(&file_path)) {
                                     Ok(cs) => {
                                         checksums.push(format!("{}|{}", file_path, cs));
