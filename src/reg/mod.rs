@@ -138,7 +138,7 @@ static ROTWK_INNER: &phf::Map<&'static str, &'static RegEntryMap> = &phf_map! {
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\ergc" => &ERGC,
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king\\1.0" => &ROTWK_1,
     "SOFTWARE\\WOW6432Node\\Electronic Arts\\The Lord of the Rings, The Rise of the Witch-king" => &ROTWK_2,
-    "SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\BFME2 Installer\\ROTWK" => &ROTWK_3
+    "SOFTWARE\\WOW6432Node\\Electronic Arts\\BFME2 Installer\\ROTWK" => &ROTWK_3
 };
 
 static ROTWK_KEYS: &phf::Map<&'static str, &phf::Map<&'static str, &'static RegEntryMap>> = &phf_map! {

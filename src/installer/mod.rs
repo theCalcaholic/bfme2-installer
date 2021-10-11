@@ -1,5 +1,6 @@
 use iced::{Column, Text, Element, Button, button, TextInput, text_input, Subscription, ProgressBar, progress_bar, Background, Color, Command};
-use super::common::{Message, Game, Installation};
+use iced_futures::{futures, BoxFuture};
+use super::common::{Message, Game, Installation, format_ergc};
 use super::extract;
 use super::checksums;
 use super::reg;
@@ -29,7 +30,8 @@ pub enum InstallerEvent {
     ErgcUpdate(String),
     ResolutionUpdate(String),
     ExtractionProgressed((usize, extract::Progress)),
-    ChecksumGenerationProgressed((usize, checksums::Progress))
+    ChecksumGenerationProgressed((usize, checksums::Progress)),
+    RegistrationDone
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -40,7 +42,8 @@ pub enum InstallerStep {
     Download,
     Install,
     Validate,
-    UserData
+    UserData,
+    Done
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,11 +60,11 @@ impl InstallerStep {
         match self {
             //InstallerStep::Configuration => InstallerStep::Download,
             InstallerStep::Inactive => InstallerStep::Configuration,
-            InstallerStep::Configuration => InstallerStep::Install,
+            InstallerStep::Configuration => InstallerStep::Validate,
             InstallerStep::Install => InstallerStep::Validate,
             InstallerStep::Validate => InstallerStep::UserData,
             InstallerStep::UserData => InstallerStep::Register,
-            InstallerStep::Register => InstallerStep::Inactive,
+            InstallerStep::Register => InstallerStep::Done,
             _ => self.clone()
         }
     }
@@ -77,7 +80,8 @@ pub struct Installer {
     ergc_input_state: text_input::State,
     res_input_state: text_input::State,
     progress: f32,
-    progress_message: String
+    progress_message: String,
+    resolution_str: String
 }
 
 struct RegRenderData {
@@ -108,7 +112,7 @@ impl progress_bar::StyleSheet for PbStyle {
 impl Installer {
 
     pub fn new(game: Game) -> Installer {
-        Installer {
+        let mut installer = Installer {
             current_step: InstallerStep::Inactive,
             data: Installation::defaults(game),
             button_states: [button::State::default()],
@@ -117,16 +121,39 @@ impl Installer {
             ergc_input_state: text_input::State::default(),
             res_input_state: text_input::State::default(),
             progress: 0.0,
-            progress_message: String::from("NONE")
-        }
+            progress_message: String::from("NONE"),
+            resolution_str: String::default()
+        };
+        installer.update_resolution_string();
+        installer
+
     }
 
     pub fn update(&mut self, event: InstallerEvent) -> Command<Message> {
         match event {
             InstallerEvent::Next => {
                 self.proceed();
-                Command::none()
+                match self.current_step {
+                    InstallerStep::Register => {
+                        let Installation{
+                            path: install_path,
+                            ergc,
+                            game,
+                            checksum,
+                            ..
+                        } = self.data.clone();
+                        let future = async move {
+                            Self::register(install_path, ergc, checksum, game);
+                        };
+                        Command::perform(future, |_| Message::InstallerEvent(InstallerEvent::RegistrationDone))
+                    },
+                    _ => Command::none()
+                }
             },
+            InstallerEvent::RegistrationDone => {
+                self.proceed();
+                Command::none()
+            }
             InstallerEvent::InstallPathUpdate(path) => {
                 self.data.path = path;
                 Command::none()
@@ -140,8 +167,14 @@ impl Installer {
                 Command::none()
             },
             InstallerEvent::ResolutionUpdate(res_str) => {
-                let vals = res_str.split("x").map(|i| i.parse::<u32>().unwrap()).collect::<Vec<u32>>();
-                self.data.resolution = (vals[0], vals[1]);
+                self.resolution_str = res_str.clone();
+                let vals = &res_str.split("x")
+                    .filter_map(|i| i.parse::<u32>().ok())
+                    .collect::<Vec<u32>>();
+                if vals.len() == 2 {
+                    self.data.resolution = (vals[0], vals[1]);
+                    self.update_resolution_string()
+                }
                 Command::none()
             }
             InstallerEvent::ExtractionProgressed(update) => {
@@ -162,6 +195,7 @@ impl Installer {
             InstallerStep::Validate => self.validate_view(),
             InstallerStep::UserData => self.validate_view(),
             InstallerStep::Register => self.registration_view(),
+            InstallerStep::Done => self.completion_view(),
             _ => self.default_view()
         }
     }
@@ -263,6 +297,7 @@ impl Installer {
                 self.progress = 100.0;
                 self.progress_message = String::from("");
                 self.calculate_checksum();
+                self.proceed();
             },
             (_, checksums::Progress::Errored) => {
                 self.progress = -100.0;
@@ -278,6 +313,10 @@ impl Installer {
         };
 
         iced::Subscription::from_recipe(checksum_generator)
+    }
+
+    fn update_resolution_string(&mut self) {
+        self.resolution_str = format!("{}x{}", self.data.resolution.0, self.data.resolution.1);
     }
 
     fn get_checksum(&self) -> Result<&str, ()> {
@@ -312,8 +351,8 @@ impl Installer {
         return Err(())
     }
 
-    fn register(data: &Installation) -> Result<(), String> {
-        let canon_path = PathBuf::from(data.path.as_str())
+    fn register(install_path: String, ergc: String, checksum: String, game: Game) -> Result<(), String> {
+        let canon_path = PathBuf::from(install_path.as_str())
             .canonicalize()
             .unwrap().to_str()
             .unwrap()
@@ -321,13 +360,13 @@ impl Installer {
         let mut reg_data = BTreeMap::new();
         reg_data.insert("install_path", canon_path.clone());
         reg_data.insert("install_path_shorthand", canon_path);
-        reg_data.insert("ergc", data.ergc.clone());
-        reg_data.insert("checksum", data.checksum.clone());
+        reg_data.insert("ergc", ergc.clone());
+        reg_data.insert("checksum", checksum.clone());
         let mut handlebars = Handlebars::new();
 
 
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        let reg_entries = match data.game {
+        let reg_entries = match game {
             Game::BFME2 => reg::BFME2,
             Game::ROTWK => reg::ROTWK,
         };
@@ -370,7 +409,6 @@ impl Installer {
     }
 
     fn registration_view(&mut self) -> Element<Message> {
-        Self::register(&self.data);
 
         //Message::InstallerNext(self.current_step.next());
 
@@ -378,6 +416,21 @@ impl Installer {
             .push(Text::new(format!("Installing {:?}", self.data.game)).size(20))
             .push(Text::new(format!("{:?}", self.current_step)))
             .push(Text::new("Writing registry entries..."))
+            .into()
+    }
+
+
+    fn completion_view(&mut self) -> Element<Message> {
+
+        //Message::InstallerNext(self.current_step.next());
+
+        Column::new()
+            .push(Text::new(format!("Installing {:?}", self.data.game)).size(20))
+            .push(Text::new(format!("{:?}", self.current_step)))
+            .push(Text::new("Installation complete!"))
+            .push(Button::new(&mut self.button_states[0],
+                                     Text::new("Ok"))
+            .on_press(Message::InstallationComplete(self.data.game, self.data.clone())))
             .into()
     }
 
@@ -395,24 +448,12 @@ impl Installer {
     }
 
     fn config_view(&mut self) -> Element<Message>{
-        let ergc_display = &self.data.ergc
-            .replace("-", "").chars()
-            .enumerate()
-            .flat_map(|(i, c)| {
-                if i != 0 && i % 4 == 0 {
-                    Some('-')
-                } else {
-                    None
-                }
-                .into_iter()
-                .chain(std::iter::once(c))
-            })
-            .collect::<String>();
+        let ergc_display = format_ergc(self.data.ergc.to_string());
         let mut view = Column::new()
             .push(Text::new(format!("Installing {:?}", self.data.game)).size(20))
             .push(Text::new("Configuration"))
             .push(TextInput::new(&mut self.res_input_state, "display resolution",
-                                 &format!("{}x{}", self.data.resolution.0, self.data.resolution.1),
+                                 &format!("{}", self.resolution_str),
                                  |data| Message::InstallerEvent(InstallerEvent::ResolutionUpdate(data))))
             .push(TextInput::new(&mut self.data_path_input_state, "data path", 
                                  &self.data.data_path,
@@ -421,10 +462,11 @@ impl Installer {
                                  "install path", &self.data.path,
                                  |data| Message::InstallerEvent(InstallerEvent::InstallPathUpdate(data))))
             .push(TextInput::new(&mut self.ergc_input_state,
-            "activation code", ergc_display,
+                                 "activation code", &*ergc_display,
                                  |data| Message::InstallerEvent(InstallerEvent::ErgcUpdate(data))))
             .push(Text::new("You can get a valid activation key from here: https://www.youtube.com/watch?v=eWg680bt_es"));
-            if PathBuf::from(&self.data.data_path).is_dir()
+            if ! self.data.path.is_empty()
+                && PathBuf::from(&self.data.data_path).is_dir()
                 && PathBuf::from(&self.data.data_path).join(format!("{}_0.tar.gz", &self.data.game)).exists()
                 && Regex::new(r"^([A-Z0-9]{4}-?){5}$").unwrap()
                 .is_match(self.data.ergc.replace("-", "").to_uppercase().as_str()) {
@@ -441,7 +483,7 @@ impl Installer {
         Column::new()
             .push(Text::new(format!("Installing {:?}", game)).size(20))
             .push(Text::new(format!("{}...", title)))
-            .push(ProgressBar::new(0.0..=100.0, progress.abs())
+            .push(ProgressBar::new(0.0..=100.0, progress.abs().max(1.0))
                 .style(PbStyle{error: match progress {
                     -100.0 => true,
                     _ => false
@@ -466,11 +508,15 @@ impl Installer {
     fn validate_view(&mut self) -> Element<Message> {
         
         let checksum = self.get_checksum();
-        let (validation_progress, validation_message, userdata_progress) = match checksum {
-            Ok(cs) => {
+        let validation_complete = match self.current_step {
+            InstallerStep::Validate => false,
+            _ => true
+        };
+        let (validation_progress, validation_message, userdata_progress) = match validation_complete {
+            true => {
                 (100.0, "", self.progress)
             },
-            Err(_) => {
+            false => {
                 (self.progress, self.progress_message.as_str().clone(), 0.0)
             }
         };
@@ -484,9 +530,9 @@ impl Installer {
                 Ok(cs) => {
                     view = view.push(
                         Text::new(format!("Your checksum: {}", cs.clone())));
-                    if userdata_progress > 0.0 {
+                    if validation_complete {
                         view = view.push(Text::new("Setting up APPDATA..."))
-                            .push(ProgressBar::new(0.0..=100.0, userdata_progress.abs())
+                            .push(ProgressBar::new(0.0..=100.0, userdata_progress.abs().max(1.0))
                                 .style(PbStyle{error: match userdata_progress {
                                     -100.0 => true,
                                     _ => false
@@ -519,10 +565,13 @@ impl Installer {
 impl From<Installation> for Installer {
     fn from(data: Installation) -> Installer {
 
-        Installer {
+        let mut installer = Installer {
             data: data.clone(),
             ..Installer::new(data.game)
-        }
+        };
+
+        installer.update_resolution_string();
+        installer
 
     }
 }

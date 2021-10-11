@@ -189,3 +189,29 @@ impl Installation {
         }
     }
 }
+
+pub fn format_ergc(ergc: String) -> String {
+
+    ergc
+        .replace("-", "").chars()
+        .enumerate()
+        .flat_map(|(i, c)| {
+            if i != 0 && i % 4 == 0 {
+                Some('-')
+            } else {
+                None
+            }
+                .into_iter()
+                .chain(std::iter::once(c))
+        })
+        .collect::<String>()
+}
+
+pub fn to_breakable(value: String) -> String {
+    let result = value.chars()
+        .enumerate()
+        .flat_map(|(i, c)| [c,'\u{200B}']).collect::<String>();
+    println!("in: {}", value);
+    println!("out: {}", result);
+    result
+}
