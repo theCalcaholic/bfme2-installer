@@ -211,7 +211,5 @@ pub fn to_breakable(value: String) -> String {
     let result = value.chars()
         .enumerate()
         .flat_map(|(i, c)| [c,'\u{200B}']).collect::<String>();
-    println!("in: {}", value);
-    println!("out: {}", result);
     result
 }
