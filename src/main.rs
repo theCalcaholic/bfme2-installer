@@ -7,13 +7,22 @@ mod reg;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use installer::{Installer, InstallerStep};
-use common::{Message, Game, Installation, format_ergc};
+use common::{Message, Game, Installation, format_ergc, str_to_emoji_hash};
 
-use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container, Length, Button, button, Subscription, Color, Row, Space};
+use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container, Length, Button, button, Subscription, Color, Row, Space, Font, TextInput, text_input};
 use iced::window::Mode;
 use iced_native::Renderer;
+use regex::Regex;
 use crate::common::to_breakable;
 use crate::installer::InstallerEvent;
+
+const ICONS: Font = Font::External {
+    name: "Icons",
+    bytes: include_bytes!("C://Windows/Fonts/seguiemj.ttf"),
+    //bytes: include_bytes!("resource/EmojiSymbols-Regular.woff"),
+    //bytes: include_bytes!("resource/EmojiOneColor.otf"),
+};
+
 
 pub fn main() -> iced::Result {
     Bfme2Manager::run(Settings {
@@ -29,7 +38,8 @@ struct Bfme2Manager {
     buttons: Vec<button::State>,
     installer: Option<Installer>,
     bfme2_install_button: button::State,
-    rotwk_install_button: button::State
+    rotwk_install_button: button::State,
+    textinputs: Vec<text_input::State>
 }
 
 impl Bfme2Manager {
@@ -38,7 +48,7 @@ impl Bfme2Manager {
         let mut installations_row = Row::new().spacing(20);
         //let old_buttons = &self.buttons.clone();
         //self.buttons = Vec::new();
-        for (installation, button) in self.installations.values().zip(self.buttons.iter_mut()) {
+        for ((installation, button), textinput) in self.installations.values().zip(self.buttons.iter_mut()).zip(self.textinputs.iter_mut()) {
             // let mut button = old_buttons.get(i).expect("Unexpected error!").clone();
             // self.buttons.push(button);
             // installations_row = installations_row.push(
@@ -53,15 +63,52 @@ impl Bfme2Manager {
                 ..
             } = installation.to_owned();
             
+            let param_header_size = 24;
             let param_title_size = 20;
             let param_value_size = 16;
+            let param_emoji_size = 28;
+
+            // TODO: Use identicons (e.g. https://crates.io/crates/identicon-rs)
+            let emoji_char_re = Regex::new(r"\P{M}\p{M}*+").unwrap();
+            let emoji_variant_re = Regex::new(r"\p{M}").unwrap();
+            let checksum_emoji_quadrupels = match str_to_emoji_hash(String::from(&checksum)) {
+                Ok(emoji_checksum) => {
+                    let emoji_chars = emoji_char_re.find_iter(&emoji_checksum).map(|m| String::from(m.as_str())).collect::<Vec<String>>();
+                    vec![0, 4, 8, 12].iter()
+                        .map(|i| emoji_chars[*i..i+4].join(""))
+                        .map(|s| emoji_variant_re.replace_all(&s, "").into_owned())
+                        .collect::<Vec<String>>()
+                },
+                Err(_) => vec![String::from("not available"), String::from(""), String::from(""), String::from("")]
+            };
+            //let emoji_quadrupels = vec![0, 4, 8, 12].iter().map(|i| emoji_checksum.chars().take(i+4).skip(*i).collect::<String>()).collect::<Vec<String>>();
+            //let emoji_chars = re.split(&emoji_checksum);
+
+            for quad in &checksum_emoji_quadrupels {
+                println!("{}", &quad);
+                println!("{}", quad.chars()
+                    .map(|c| format!("{} ({:x})", c, c as i32)).collect::<Vec<String>>().join("-"))
+            }
+
+            let ergc_emoji_quadrupels = match str_to_emoji_hash(String::from(&ergc)) {
+                Ok(emoji_ergc) => {
+                    let emoji_chars = emoji_char_re.find_iter(&emoji_ergc).map(|m| String::from(m.as_str())).collect::<Vec<String>>();
+                    vec![0, 4, 8, 12].iter()
+                        .map(|i| emoji_chars[*i..i+4].join(""))
+                        .map(|s| emoji_variant_re.replace_all(&s, "").into_owned())
+                        .collect::<Vec<String>>()
+                },
+                Err(_) => vec![String::from("not available"), String::from(""), String::from(""), String::from("")]
+            };
 
             installations_row = installations_row.push(
+                {
+                let mut re = Regex::new(r"\p{M}*").unwrap();
                 Column::new().spacing(10)
                     .push(Text::new(game.to_string()).size(26))
                     .push(Row::new().spacing(4)
                         .push(Text::new("Checksum: ").size(param_title_size))
-                        .push(Text::new(checksum).size(param_value_size)))
+                        .push(Text::new(&checksum).size(param_value_size)))
                     .push(Row::new().spacing(4)
                         .push(Text::new("Install Path: ").size(param_title_size))
                         .push(Text::new(to_breakable(path)).size(param_value_size)))
@@ -77,7 +124,23 @@ impl Bfme2Manager {
                         .push(Text::new(format!("{}x{}", resolution.0, resolution.1)).size(param_value_size)))
                     .push(Button::new(button,
                                       Text::new(format!("Reinstall {}", game)))
-                        .on_press(Message::StartInstallation(game))).width(Length::FillPortion(1)));
+                        .on_press(Message::StartInstallation(game))).width(Length::FillPortion(1))
+                    .push(Row::new().spacing(4).push(Text::new("Compatibility").size(param_header_size)))
+                    .push(Row::new().push(Text::new("Must be equal: ")))
+                    // .push(
+                    //     TextInput::new(textinput, "", &emoji_quadrupels[1], |data| Message::InstallerEvent(InstallerEvent::ResolutionUpdate(String::from("1680x1050"))))
+                    //     //TextInput::new(&emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size))
+                    // )
+                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[1]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[2]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[3]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new("Must be different: ")))
+                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[1]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[2]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[3]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                });
         }
 
         let mut buttons_col = Column::new().spacing(40);
@@ -127,12 +190,14 @@ impl Application for Bfme2Manager {
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let mut installations = HashMap::new();
         let mut buttons: Vec<button::State> = Vec::new();
+        let mut textinputs: Vec<text_input::State> = Vec::new();
 
         Game::all().iter()
             .filter_map(Installation::load)
             .for_each(|inst| {
                 installations.insert(inst.game, inst);
                 buttons.push(button::State::default());
+                textinputs.push(text_input::State::default());
             });
 
         (
@@ -141,7 +206,8 @@ impl Application for Bfme2Manager {
                 buttons,
                 installer: None,
                 bfme2_install_button: button::State::default(),
-                rotwk_install_button: button::State::default()
+                rotwk_install_button: button::State::default(),
+                textinputs
             },
             Command::none()
         )

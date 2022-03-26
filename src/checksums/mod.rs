@@ -11,7 +11,7 @@ use iced_futures::{BoxStream, futures};
 
 const BUFFER_SIZE: usize = 1024;
 
-fn md5sum<D: Digest + Default, R: Read>(reader: &mut R) -> Result<Output<D>, String> {
+pub fn md5sum<D: Digest + Default, R: Read>(reader: &mut R) -> Result<Output<D>, String> {
     let mut sh = D::default();
     let mut buffer = [0u8; BUFFER_SIZE];
 

@@ -1,15 +1,20 @@
 use super::installer::{InstallerStep, InstallationProgress};
 use super::{extract, checksums};
 use std::env;
+use md5::{Digest, Md5};
+use md5::digest::Output;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
+use std::io::{Read, Cursor};
+use std::str::from_utf8;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
+use base_emoji::try_from_str;
 use crate::installer::InstallerEvent;
 use crate::reg::get_reg_value;
+use crate::checksums::md5sum;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Game {
@@ -212,4 +217,20 @@ pub fn to_breakable(value: String) -> String {
         .enumerate()
         .flat_map(|(i, c)| [c,'\u{200B}']).collect::<String>();
     result
+}
+
+pub fn str_to_emoji_hash(value: String) -> Result<String, String> {
+    match md5sum::<Md5, _>(&mut Cursor::new(value.as_bytes())) {
+        Ok(checksum) => {
+            for c in checksum {
+                print!("{:02x} - ", c)
+            };
+            println!("");
+            let emoji_string = base_emoji::to_string::<&[u8]>(checksum.iter().map(|b| b % 0xff).collect::<Vec<u8>>().as_slice());
+            println!("{}", emoji_string);
+            Ok(emoji_string)
+        },
+        Err(e) => Err(e)
+    }
+
 }

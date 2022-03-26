@@ -19,6 +19,7 @@ tempfile = "3.2.0"
 regex = "1.5.4"
 dirs = "4.0.0"
 phf = { version = "0.10.0", features = ["macros"] }
+base_emoji = "1.1"
 
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
