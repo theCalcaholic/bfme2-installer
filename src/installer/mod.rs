@@ -143,7 +143,9 @@ impl Installer {
                             ..
                         } = self.data.clone();
                         let future = async move {
-                            Self::register(install_path, ergc, checksum, game);
+                            if let Err(msg) = Self::register(install_path, ergc, checksum, game) {
+                                println!("ERROR: {}", msg);
+                            }
                         };
                         Command::perform(future, |_| Message::InstallerEvent(InstallerEvent::RegistrationDone))
                     },
@@ -399,7 +401,13 @@ impl Installer {
                         }
                     },
                 }
-            }).all(|result: Result<(), std::io::Error>| result.is_ok())
+            }).all(|result: Result<(), std::io::Error>| {
+                if result.is_err() {
+                    println!("ERROR: {}", result.unwrap_err());
+                    return false
+                }
+                true
+            })
         }).all(|result| result) {
             Ok(())
         } else {

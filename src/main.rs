@@ -4,24 +4,29 @@ mod extract;
 mod checksums;
 mod reg;
 
-use std::borrow::BorrowMut;
+use std::io::{Cursor};
 use std::collections::HashMap;
 use installer::{Installer, InstallerStep};
-use common::{Message, Game, Installation, format_ergc, str_to_emoji_hash};
+use md5::Md5;
+use common::{Message, Game, Installation, format_ergc};
+use checksums::md5sum;
 
-use iced::{Column, Text, Settings, Application, executor, Command, Clipboard, Element, Container, Length, Button, button, Subscription, Color, Row, Space, Font, TextInput, text_input};
-use iced::window::Mode;
-use iced_native::Renderer;
+use iced::{
+    image, Column, Text, Settings, Application, executor, Command,
+    Clipboard, Element, Container, Length, Button, button, Subscription,
+    Row, Space, text_input
+};
 use regex::Regex;
+use blockies::{Classic, Ethereum};
 use crate::common::to_breakable;
 use crate::installer::InstallerEvent;
 
-const ICONS: Font = Font::External {
-    name: "Icons",
-    bytes: include_bytes!("C://Windows/Fonts/seguiemj.ttf"),
-    //bytes: include_bytes!("resource/EmojiSymbols-Regular.woff"),
-    //bytes: include_bytes!("resource/EmojiOneColor.otf"),
-};
+// const ICONS: Font = Font::External {
+//     name: "Icons",
+//     bytes: include_bytes!("C://Windows/Fonts/seguiemj.ttf"),
+//     //bytes: include_bytes!("resource/EmojiSymbols-Regular.woff"),
+//     //bytes: include_bytes!("resource/EmojiOneColor.otf"),
+// };
 
 
 pub fn main() -> iced::Result {
@@ -35,11 +40,10 @@ pub fn main() -> iced::Result {
 #[derive(Debug)]
 struct Bfme2Manager {
     installations: HashMap<Game, Installation>,
-    buttons: Vec<button::State>,
     installer: Option<Installer>,
     bfme2_install_button: button::State,
     rotwk_install_button: button::State,
-    textinputs: Vec<text_input::State>
+    inst_ui_states: Vec<(text_input::State, button::State, image::viewer::State, image::viewer::State)>,
 }
 
 impl Bfme2Manager {
@@ -48,7 +52,7 @@ impl Bfme2Manager {
         let mut installations_row = Row::new().spacing(20);
         //let old_buttons = &self.buttons.clone();
         //self.buttons = Vec::new();
-        for ((installation, button), textinput) in self.installations.values().zip(self.buttons.iter_mut()).zip(self.textinputs.iter_mut()) {
+        for (installation, (textinput, button, compat_image_checksum, compat_image_ergc)) in self.installations.values().zip(self.inst_ui_states.iter_mut()) {
             // let mut button = old_buttons.get(i).expect("Unexpected error!").clone();
             // self.buttons.push(button);
             // installations_row = installations_row.push(
@@ -66,44 +70,27 @@ impl Bfme2Manager {
             let param_header_size = 24;
             let param_title_size = 20;
             let param_value_size = 16;
-            let param_emoji_size = 28;
 
-            // TODO: Use identicons (e.g. https://crates.io/crates/identicon-rs)
-            let emoji_char_re = Regex::new(r"\P{M}\p{M}*+").unwrap();
-            let emoji_variant_re = Regex::new(r"\p{M}").unwrap();
-            let checksum_emoji_quadrupels = match str_to_emoji_hash(String::from(&checksum)) {
-                Ok(emoji_checksum) => {
-                    let emoji_chars = emoji_char_re.find_iter(&emoji_checksum).map(|m| String::from(m.as_str())).collect::<Vec<String>>();
-                    vec![0, 4, 8, 12].iter()
-                        .map(|i| emoji_chars[*i..i+4].join(""))
-                        .map(|s| emoji_variant_re.replace_all(&s, "").into_owned())
-                        .collect::<Vec<String>>()
-                },
-                Err(_) => vec![String::from("not available"), String::from(""), String::from(""), String::from("")]
-            };
-            //let emoji_quadrupels = vec![0, 4, 8, 12].iter().map(|i| emoji_checksum.chars().take(i+4).skip(*i).collect::<String>()).collect::<Vec<String>>();
-            //let emoji_chars = re.split(&emoji_checksum);
-
-            for quad in &checksum_emoji_quadrupels {
-                println!("{}", &quad);
-                println!("{}", quad.chars()
-                    .map(|c| format!("{} ({:x})", c, c as i32)).collect::<Vec<String>>().join("-"))
+            let mut blockies = Classic::default();
+            blockies.size = 8;
+            blockies.scale = 16;
+            let mut checksum_png = Vec::new();
+            if let Err(e) = blockies.create_icon(&mut checksum_png, checksum.as_bytes().into()) {
+                println!("ERROR: {:#?}", e);
             }
-
-            let ergc_emoji_quadrupels = match str_to_emoji_hash(String::from(&ergc)) {
-                Ok(emoji_ergc) => {
-                    let emoji_chars = emoji_char_re.find_iter(&emoji_ergc).map(|m| String::from(m.as_str())).collect::<Vec<String>>();
-                    vec![0, 4, 8, 12].iter()
-                        .map(|i| emoji_chars[*i..i+4].join(""))
-                        .map(|s| emoji_variant_re.replace_all(&s, "").into_owned())
-                        .collect::<Vec<String>>()
-                },
-                Err(_) => vec![String::from("not available"), String::from(""), String::from(""), String::from("")]
-            };
+            let identicom_checksum_img = image::Viewer::new(compat_image_checksum, image::Handle::from_memory(checksum_png));
+            
+            let ergc_checksum = md5sum::<Md5, _>(&mut Cursor::new(ergc.as_bytes()))
+                .expect("ERROR: Could not create checksum from ergc!");
+            
+            let mut ergc_png = Vec::new();
+            if let Err(e) = blockies.create_icon(&mut ergc_png, format!("{:x}", ergc_checksum).as_bytes()) {
+                println!("ERROR: {:#?}", e);
+            }
+            let identicon_ergc_img = image::Viewer::new(compat_image_ergc, image::Handle::from_memory(ergc_png));
 
             installations_row = installations_row.push(
                 {
-                let mut re = Regex::new(r"\p{M}*").unwrap();
                 Column::new().spacing(10)
                     .push(Text::new(game.to_string()).size(26))
                     .push(Row::new().spacing(4)
@@ -130,16 +117,9 @@ impl Bfme2Manager {
                     // .push(
                     //     TextInput::new(textinput, "", &emoji_quadrupels[1], |data| Message::InstallerEvent(InstallerEvent::ResolutionUpdate(String::from("1680x1050"))))
                     //     //TextInput::new(&emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size))
-                    // )
-                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[1]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[2]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&checksum_emoji_quadrupels[3]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(identicom_checksum_img))
                     .push(Row::new().push(Text::new("Must be different: ")))
-                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[1]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[2]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
-                    .push(Row::new().push(Text::new(&ergc_emoji_quadrupels[3]).color(Color::BLACK).font(ICONS).size(param_emoji_size)))
+                    .push(Row::new().push(identicon_ergc_img))
                 });
         }
 
@@ -189,25 +169,22 @@ impl Application for Bfme2Manager {
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let mut installations = HashMap::new();
-        let mut buttons: Vec<button::State> = Vec::new();
-        let mut textinputs: Vec<text_input::State> = Vec::new();
+        let mut inst_ui_states: Vec<(text_input::State, button::State, image::viewer::State, image::viewer::State)> = Vec::new();
 
         Game::all().iter()
             .filter_map(Installation::load)
             .for_each(|inst| {
                 installations.insert(inst.game, inst);
-                buttons.push(button::State::default());
-                textinputs.push(text_input::State::default());
+                inst_ui_states.push((text_input::State::default(), button::State::default(), image::viewer::State::new(), image::viewer::State::new()));
             });
 
         (
             Bfme2Manager {
                 installations,
-                buttons,
                 installer: None,
                 bfme2_install_button: button::State::default(),
                 rotwk_install_button: button::State::default(),
-                textinputs
+                inst_ui_states
             },
             Command::none()
         )
@@ -234,7 +211,7 @@ impl Application for Bfme2Manager {
             }
             Message::InstallationComplete(game, data) => {
                 self.installations.insert(game, data);
-                self.buttons.push(button::State::default());
+                self.inst_ui_states.push((text_input::State::default(), button::State::default(), image::viewer::State::new(), image::viewer::State::new()));
                 self.installer = None;
                 Command::none()
             }
