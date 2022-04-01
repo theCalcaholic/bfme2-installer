@@ -3,12 +3,15 @@ mod common;
 mod extract;
 mod checksums;
 mod reg;
+mod components;
 
+use std::cell::Cell;
 use std::io::{Cursor};
 use std::collections::HashMap;
+use bfme2_installer::common::InstallationProgress;
 use installer::{Installer, InstallerStep};
 use md5::Md5;
-use common::{Message, Game, Installation, format_ergc};
+use common::{Message, Game, Installation, format_ergc, InstallationUIState};
 use checksums::md5sum;
 
 use iced::{
@@ -20,6 +23,7 @@ use regex::Regex;
 use blockies::{Classic, Ethereum};
 use crate::common::to_breakable;
 use crate::installer::InstallerEvent;
+use crate::components::InstallationView;
 
 // const ICONS: Font = Font::External {
 //     name: "Icons",
@@ -39,125 +43,35 @@ pub fn main() -> iced::Result {
 
 #[derive(Debug)]
 struct Bfme2Manager {
-    installations: HashMap<Game, Installation>,
-    installer: Option<Installer>,
+    installations: (Installation, Installation),
+    views: (InstallationView, InstallationView),
+    // installations: HashMap<Game, (Installation, InstallationUIState, InstallationView)>,
+    installer: Option<(Installer, Game)>,
     bfme2_install_button: button::State,
     rotwk_install_button: button::State,
-    inst_ui_states: Vec<(text_input::State, button::State, image::viewer::State, image::viewer::State)>,
+    //inst_ui_states: Vec<(text_input::State, button::State, image::viewer::State, image::viewer::State)>,
 }
 
 impl Bfme2Manager {
-
-    fn dashboard(&mut self) -> Element<Message> {
-        let mut installations_row = Row::new().spacing(20);
-        //let old_buttons = &self.buttons.clone();
-        //self.buttons = Vec::new();
-        for (installation, (textinput, button, compat_image_checksum, compat_image_ergc)) in self.installations.values().zip(self.inst_ui_states.iter_mut()) {
-            // let mut button = old_buttons.get(i).expect("Unexpected error!").clone();
-            // self.buttons.push(button);
-            // installations_row = installations_row.push(
-            //     Self::installation_view(&installation, &mut button));
-
-            let Installation{
-                checksum,
-                path,
-                ergc,
-                resolution,
-                game,
-                ..
-            } = installation.to_owned();
-            
-            let param_header_size = 24;
-            let param_title_size = 20;
-            let param_value_size = 16;
-
-            let mut blockies = Classic::default();
-            blockies.size = 8;
-            blockies.scale = 16;
-            let mut checksum_png = Vec::new();
-            if let Err(e) = blockies.create_icon(&mut checksum_png, checksum.as_bytes().into()) {
-                println!("ERROR: {:#?}", e);
-            }
-            let identicom_checksum_img = image::Viewer::new(compat_image_checksum, image::Handle::from_memory(checksum_png));
-            
-            let ergc_checksum = md5sum::<Md5, _>(&mut Cursor::new(ergc.as_bytes()))
-                .expect("ERROR: Could not create checksum from ergc!");
-            
-            let mut ergc_png = Vec::new();
-            if let Err(e) = blockies.create_icon(&mut ergc_png, format!("{:x}", ergc_checksum).as_bytes()) {
-                println!("ERROR: {:#?}", e);
-            }
-            let identicon_ergc_img = image::Viewer::new(compat_image_ergc, image::Handle::from_memory(ergc_png));
-
-            installations_row = installations_row.push(
-                {
-                Column::new().spacing(10)
-                    .push(Text::new(game.to_string()).size(26))
-                    .push(Row::new().spacing(4)
-                        .push(Text::new("Checksum: ").size(param_title_size))
-                        .push(Text::new(&checksum).size(param_value_size)))
-                    .push(Row::new().spacing(4)
-                        .push(Text::new("Install Path: ").size(param_title_size))
-                        .push(Text::new(to_breakable(path)).size(param_value_size)))
-                    .push(Row::new().spacing(4)
-                        .push(Text::new("Userdata Directory: ").size(param_title_size))
-                        .push(Text::new(to_breakable(installation.get_userdata_path()
-                                                .expect("Error retrieving userdata path"))).size(param_value_size)))
-                    .push(Row::new().spacing(4)
-                        .push(Text::new("Activation Code: ").size(param_title_size))
-                        .push(Text::new(format_ergc(ergc)).size(param_value_size)))
-                    .push(Row::new().spacing(4)
-                        .push(Text::new("Resolution: ").size(param_title_size))
-                        .push(Text::new(format!("{}x{}", resolution.0, resolution.1)).size(param_value_size)))
-                    .push(Button::new(button,
-                                      Text::new(format!("Reinstall {}", game)))
-                        .on_press(Message::StartInstallation(game))).width(Length::FillPortion(1))
-                    .push(Row::new().spacing(4).push(Text::new("Compatibility").size(param_header_size)))
-                    .push(Row::new().push(Text::new("Must be equal: ")))
-                    // .push(
-                    //     TextInput::new(textinput, "", &emoji_quadrupels[1], |data| Message::InstallerEvent(InstallerEvent::ResolutionUpdate(String::from("1680x1050"))))
-                    //     //TextInput::new(&emoji_quadrupels[0]).color(Color::BLACK).font(ICONS).size(param_emoji_size))
-                    .push(Row::new().push(identicom_checksum_img))
-                    .push(Row::new().push(Text::new("Must be different: ")))
-                    .push(Row::new().push(identicon_ergc_img))
-                });
-        }
-
-        let mut buttons_col = Column::new().spacing(40);
-
-        if !self.installations.contains_key(&Game::BFME2) {
-            let mut bfme2_button = Button::new(&mut self.bfme2_install_button,
-                                               Text::new(format!("Install {}", Game::BFME2)));
-            bfme2_button = bfme2_button.on_press(Message::StartInstallation(Game::BFME2));
-            buttons_col = buttons_col.push(bfme2_button)
-        }
-        if !self.installations.contains_key(&Game::ROTWK) {
-            let mut rotwk_button = Button::new(&mut self.rotwk_install_button,
-                                               Text::new(format!("Install {}", Game::ROTWK)));
-            rotwk_button = rotwk_button.on_press(Message::StartInstallation(Game::ROTWK));
-            buttons_col = buttons_col.push(rotwk_button);
-        }
-
-
-        installations_row = installations_row.push(buttons_col);
-        // let not_installed: Vec<Game> = Game::all();
-        // if not_installed.len() > 0 {
-        //     for (game, mut button) in not_installed.iter().zip(&not_installed.iter().map(|g| match g {
-        //         Game::BFME2 => self.bfme2_install_button.borrow_mut(),
-        //         Game::ROTWK => self.rotwk_install_button.borrow_mut()
-        //     }).collect::<Vec<button::State>>()) {
-        //         // let mut button = match game {
-        //         //     Game::BFME2 => &mut self.bfme2_install_button,
-        //         //     Game::ROTWK => &mut self.rotwk_install_button
-        //         // };
-        //     }
-        //
-        // }
-
+    fn render_installations(&mut self) -> Element<Message> {
+        let installer_views = match self.installer {
+            Some((ref mut installer, game)) => {
+                match game {
+                    Game::BFME2 => (Some(installer.view(&self.installations.0)), None),
+                    Game::ROTWK => (None, Some(installer.view(&self.installations.1)))
+                }
+            },
+            None => (None, None)
+        };
+        
         Column::new().height(Length::Fill)
             .push(Text::new("Installed Games").size(40))
             .push(Space::with_height(Length::Units(20)))
-            .push(installations_row)
+            .push(Row::new().spacing(20)
+                .push(Column::new().spacing(10).width(Length::FillPortion(1))
+                    .push(self.views.0.render(&self.installations.0, installer_views.0, None)))
+                .push(Column::new().spacing(10).width(Length::FillPortion(1))
+                    .push(self.views.1.render(&self.installations.1, installer_views.1, Some(&self.installations.0)))))
             .into()
     }
 }
@@ -168,23 +82,21 @@ impl Application for Bfme2Manager {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let mut installations = HashMap::new();
-        let mut inst_ui_states: Vec<(text_input::State, button::State, image::viewer::State, image::viewer::State)> = Vec::new();
-
-        Game::all().iter()
-            .filter_map(Installation::load)
-            .for_each(|inst| {
-                installations.insert(inst.game, inst);
-                inst_ui_states.push((text_input::State::default(), button::State::default(), image::viewer::State::new(), image::viewer::State::new()));
-            });
-
+        let installations = (
+            Installation::load(&Game::BFME2).unwrap_or_else(|_| Installation::defaults(Game::BFME2)),
+            Installation::load(&Game::ROTWK).unwrap_or_else(|_| Installation::defaults(Game::ROTWK)),
+        );
+        println!("Installations: {:#?}", installations);
+        let (inst1, inst2) = installations.clone();
         (
             Bfme2Manager {
-                installations,
+                installations: (installations.0, installations.1),
+                views: (InstallationView::new(inst1.game), InstallationView::new(inst2.game)),
+                //bfme2_view: InstallationView::new(),
                 installer: None,
                 bfme2_install_button: button::State::default(),
                 rotwk_install_button: button::State::default(),
-                inst_ui_states
+                //inst_ui_states
             },
             Command::none()
         )
@@ -196,59 +108,132 @@ impl Application for Bfme2Manager {
 
     fn update(&mut self, message: Self::Message, _clipboard: &mut Clipboard) -> Command<Self::Message> {
         match message {
-            Message::StartInstallation(game) => {
-                let mut installer = if self.installations.contains_key(&game) {
-                    Installer::from(self.installations[&game].clone())
-                } else {
-                    Installer::new(game)
+            Message::StartInstallation(game)|Message::StartValidation(game) => {
+                self.views.0.loose_focus();
+                self.views.1.loose_focus();
+                if self.installations.0.in_progress || self.installations.1.in_progress {
+                    println!("There is already an installation in progress!");
+                    return Command::none();
+                }
+                let steps = match message {
+                    Message::StartInstallation(_) => InstallerStep::installation_steps(),
+                    Message::StartValidation(_) => InstallerStep::validation_steps(),
+                    _ => vec![InstallerStep::Inactive]
                 };
-                installer.proceed();
-                self.installer = Some(installer);
+                println!("steps: {:#?}", steps);
+                let installation = match game {
+                    Game::BFME2 => &mut self.installations.0,
+                    Game::ROTWK => &mut self.installations.1
+                };
+                let mut installer = Installer::new(steps);
+                installer.proceed(&installation);
+                self.installer = Some((installer, installation.game));
+                installation.in_progress = true;
+                // view.set_installer(&mut installer);
                 Command::none()
             },
-            Message::InstallerEvent(event) => {
-                self.installer.as_mut().unwrap().update(event)
+            Message::Progressed((id, progress)) => {
+                match self.installer {
+                    Some((ref mut installer, game)) => {
+                        match game {
+                            Game::BFME2 => installer.on_progress(&self.installations.0, progress),
+                            Game::ROTWK => installer.on_progress(&self.installations.1, progress)
+                        }
+                        
+                    },
+                    None => Command::none()
+                }
+            },
+            Message::InstallationEvent(Game::BFME2, event) => {
+                self.views.0.update(&self.installations.0, event)
             }
-            Message::InstallationComplete(game, data) => {
-                self.installations.insert(game, data);
-                self.inst_ui_states.push((text_input::State::default(), button::State::default(), image::viewer::State::new(), image::viewer::State::new()));
+            Message::InstallationEvent(Game::ROTWK, event) => {
+                self.views.1.update(&self.installations.1, event)
+            },
+            Message::AttributeUpdate(game, attr, value) => {
+                match game {
+                    Game::BFME2 => {self.installations.0.set_attribute(&attr, value)},
+                    Game::ROTWK => {self.installations.1.set_attribute(&attr, value)}
+                }.expect("Error while updating installation attribute");
+                Command::none()
+
+            }
+            // Message::InstallerEvent(event) => {
+            //     self.installer.as_mut().unwrap().update(event)
+            // }
+            Message::InstallationComplete(game) => {
+                match game {
+                    Game::BFME2 => {
+                        self.installations.0.is_complete = true;
+                        self.installations.0.in_progress = false;
+                    },
+                    Game::ROTWK => {
+                        self.installations.1.is_complete = true;
+                        self.installations.1.in_progress = false;
+                    },
+                }
+                //self.installations.insert(game, (data, InstallationUIState::new(), InstallationView::new()));
+                //self.inst_ui_states.push((text_input::State::default(), button::State::default(), image::viewer::State::new(), image::viewer::State::new()));
                 self.installer = None;
                 Command::none()
             }
-            _ => Command::none()
+            // Message::AttributeClicked(game, id) => {
+            //     match game {
+            //         Game::BFME2 => self.views.0.edit_attribute(id),
+            //         Game::ROTWK => self.views.1.edit_attribute(id)
+            //     };
+            //     Command::none()
+            // }
+            m => {
+                println!("msg: {:#?}", m);
+                Command::none()
+            }
         }
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
-        match self.installer.as_ref() {
-            Some(installer) => match installer.current_step {
-                InstallerStep::Install => {
-                    installer.commence_install()
-                        .map(|v| Message::InstallerEvent(InstallerEvent::ExtractionProgressed(v)))
-                },
-                InstallerStep::Validate => {
-                    installer.commence_generate_checksums()
-                        .map(|v| Message::InstallerEvent(InstallerEvent::ChecksumGenerationProgressed(v)))
-                },
-                InstallerStep::UserData => {
-                    installer.commence_install_userdata()
-                        .map(|v| Message::InstallerEvent(InstallerEvent::ExtractionProgressed(v)))
-                }
-                _ => Subscription::none()
-            },
-            None => Subscription::none()
-        }
+    fn subscription(&self) -> Subscription<Message> {
+
+        let subscriptions = match &self.installer {
+            Some((installer, game)) => installer.subscriptions(match game {
+                Game::BFME2 => &self.installations.0,
+                Game::ROTWK => &self.installations.1
+            }),
+            None => vec![]
+        };
+
+        // let mut subscriptions = match &mut self.installations.0.2 {
+        //     Some(installer) => installer.subscriptions(&self.installations.0.0),
+        //     None => vec![]
+        // };
+        // subscriptions.extend(match self.installations.1.2 {
+        //     Some(installer) => installer.subscriptions(&self.installations.1.0),
+        //     None => vec![]
+        // });
+        Subscription::batch(subscriptions).map(Message::Progressed)
+
+        // match self.installer.as_ref() {
+        //     Some(installer) => match installer.current_step {
+        //         // InstallerStep::Install => {
+        //         //     installer.commence_install()
+        //         //         .map(|v| Message::InstallerEvent(InstallerEvent::ExtractionProgressed(v)))
+        //         // },
+        //         InstallerStep::Validate => {
+        //             installer.commence_generate_checksums(self.installations)
+        //                 .map(|v| Message::InstallerEvent(InstallerEvent::ChecksumGenerationProgressed(v)))
+        //         },
+        //         // InstallerStep::UserData => {
+        //         //     installer.commence_install_userdata()
+        //         //         .map(|v| Message::InstallerEvent(InstallerEvent::ExtractionProgressed(v)))
+        //         // }
+        //         _ => Subscription::none()
+        //     },
+        //     None => Subscription::none()
+        // }
     }
 
     fn view(&mut self) -> Element<Message> {
 
-        let active_widget = if self.installer.is_none() {
-            self.dashboard()
-        } else {
-            self.installer.as_mut().unwrap().view()
-        };
-
-        Container::new(active_widget)
+        Container::new(self.render_installations())
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x()

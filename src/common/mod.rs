@@ -1,8 +1,12 @@
-use super::installer::{InstallerStep, InstallationProgress};
+use super::installer::{InstallerStep};
 use super::{extract, checksums};
+use super::checksums::Progress as ValidationProgress;
+use super::components::InstallationEvent;
 use std::env;
+use std::path::PathBuf;
 use md5::{Digest, Md5};
 use md5::digest::Output;
+use regex::Regex;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
@@ -15,6 +19,9 @@ use base_emoji::try_from_str;
 use crate::installer::InstallerEvent;
 use crate::reg::get_reg_value;
 use crate::checksums::md5sum;
+use iced::{
+    button, text_input, image
+};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Game {
@@ -45,20 +52,75 @@ impl Display for Game{
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    InstallerEvent(InstallerEvent),
+    InstallationEvent(Game, InstallationEvent),
+    AttributeUpdate(Game, InstallationAttribute, String),
     StartInstallation(Game),
-    InstallationComplete(Game, Installation)
+    StartValidation(Game),
+    InstallationComplete(Game),
+    ValidationComplete(Game, String),
+    Progressed((usize, InstallationProgress))
+}
+
+
+#[derive(Debug, Clone)]
+pub enum InstallationProgress {
+    Started,
+    Finished,
+    ChecksumResult(String, String),
+    Extracting(f32, String),
+    Progressed(u32),
+    Errored(String),
+    Skipped
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallationAttribute {
+    Checksum, InstallPath, UserdataPath, ERGC, Resolution, InstallationSource
+}
+
+
+impl Hash for InstallationAttribute {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state)
+    }
+}
+
+
+impl ToString for InstallationAttribute {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Checksum => "Checksum",
+            Self::InstallPath => "Install Path",
+            Self::UserdataPath => "Userdata Directory",
+            Self::ERGC => "Activation Code",
+            Self::Resolution => "Resolution",
+            Self::InstallationSource => "Install Source"
+        }.to_string()
+    }
+}
+
+impl InstallationAttribute {
+    pub fn all() -> Vec<InstallationAttribute> {
+        vec![InstallationAttribute::Checksum, 
+            InstallationAttribute::InstallPath, 
+            InstallationAttribute::UserdataPath, 
+            InstallationAttribute::ERGC,
+            InstallationAttribute::Resolution,
+            InstallationAttribute::InstallationSource]
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Installation {
     pub game: Game,
     pub path: String,
-    pub data_path: String,
     userdata_path: String,
     pub checksum: String,
     pub ergc: String,
-    pub resolution: (u32, u32)
+    resolution: (u32, u32),
+    pub install_source: Option<String>,
+    pub is_complete: bool,
+    pub in_progress: bool,
 }
 
 impl Installation {
@@ -67,19 +129,21 @@ impl Installation {
             game,
             path: String::default(),
             userdata_path: String::default(),
-            data_path: env::current_dir()
+            checksum: String::default(),
+            ergc: String::default(),
+            resolution: (1024, 768),
+            install_source: Some(env::current_dir()
                 .expect("Could not retrieve current directory!")
                 .canonicalize()
                 .unwrap().to_str()
                 .unwrap()
-                .replace("\\\\?\\", ""),
-            checksum: String::default(),
-            ergc: String::default(),
-            resolution: (1024, 768)
+                .replace("\\\\?\\", ""),),
+            is_complete: false,
+            in_progress: false
         }
     }
 
-    pub(crate) fn load(game: &Game) -> Option<Installation> {
+    pub fn load(game: &Game) -> Result<Installation, String> {
         let game_slug = match game {
             Game::BFME2 => "The Battle for Middle-earth II",
             Game::ROTWK => "The Lord of the Rings, The Rise of the Witch-king"
@@ -98,16 +162,16 @@ impl Installation {
             &*format!("SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\{}", game_slug),
             "UserDataLeafName"
         );
-        let data_path_result = Installation::defaults(*game).data_path;
+        //let data_path_result = Installation::defaults(*game).install_source;
         let ergc_result = get_reg_value::<String>(
             HKEY_LOCAL_MACHINE,
             &*format!("SOFTWARE\\WOW6432Node\\Electronic Arts\\Electronic Arts\\{}\\ergc", game_slug),
             ""
         );
-        println!("Attempted to load data from registry. Found:\n '{:?}' '{:?}' '{:?}' '{}' '{:?}'",
-                 checksum_result, path_result, userdata_dir_result, data_path_result, ergc_result);
-        match (checksum_result, path_result, userdata_dir_result, data_path_result, ergc_result) {
-            (Ok(checksum), Ok(path), Ok(userdata_dir), data_path, Ok(ergc)) => {
+        println!("Attempted to load data from registry. Found:\n '{:?}' '{:?}' '{:?}'' '{:?}'",
+                 checksum_result, path_result, userdata_dir_result, ergc_result);
+        match (checksum_result, path_result, userdata_dir_result, ergc_result) {
+            (Ok(checksum), Ok(path), Ok(userdata_dir), Ok(ergc)) => {
                 let userdata_path = dirs::home_dir().unwrap()
                     .join("AppData").join("Roaming")
                     .join(userdata_dir);
@@ -130,51 +194,61 @@ impl Installation {
                                 match v.len() {
                                     2 => {
                                         let resolution = (v[0], v[1]);
-                                        Some(Installation {
+                                        Ok(Installation {
                                             game: *game,
                                             checksum,
                                             path,
                                             userdata_path: userdata_path.to_str().unwrap().to_owned(),
-                                            data_path,
                                             ergc,
-                                            resolution
+                                            resolution,
+                                            install_source: None,
+                                            is_complete: true,
+                                            in_progress: false
                                         })
                                     },
                                     _ => {
-                                        println!("Error parsing options.ini");
-                                        None
+                                        Err(String::from("Error parsing options.ini"))
                                     }
                                 }
                             },
-                            None => None
+                            None => Err(String::from("Could not find Resolution in options.ini!"))
                         }
                     },
                     _ => {
-                        println!("Couldn't open '{}'",
-                                 options_path.display());
-                        None
+                        Err(String::from(format!("Couldn't open '{:?}'", options_path)))
                     }
                 }
             }
             e => {
-                println!("Not matching: Got ({})", [e.0, e.1, e.2, Ok(e.3), e.4]
+                Err(String::from(format!("Not matching: Got ({})", [e.0, e.1, e.2, e.3]
                     .map(|v| match v {
                         Ok(inner) => ("Ok", inner),
                         Err(inner) => ("Err", inner.to_string()),
-                    }).iter().fold(String::default(), |v, w| v + &*format!("{}({}), ", w.0, w.1)));
-                None
+                    }).iter().fold(String::default(), |v, w| v + &*format!("{}({}), ", w.0, w.1)))))
             }
         }
 
     }
 
-    pub fn get_userdata_path(&self) -> Result<String, ()> {
-        let userdata_path = match self.userdata_path.is_empty() {
-             true => {
+    pub fn update_from(&mut self, other: Installation) {
+        
+        self.game = other.game.clone();
+        self.path = other.path.clone();
+        self.install_source = other.install_source.clone();
+        self.userdata_path = other.userdata_path.clone();
+        self.checksum = other.checksum.clone();
+        self.ergc = other.ergc.clone();
+        self.resolution = other.resolution.clone();
+        self.is_complete = other.is_complete.clone();
+    }
+
+    pub fn get_userdata_path(&self) -> Option<String> {
+        match self.userdata_path.is_empty() {
+            true => {
                 match self.checksum.is_empty() {
-                    true => Err(()),
+                    true => None,
                     false => {
-                        Ok(dirs::home_dir().unwrap()
+                        Some(dirs::home_dir().unwrap()
                             .join("AppData").join("Roaming")
                             .join(format!("{}_{}",
                                           &self.game.to_string().to_lowercase(),
@@ -183,19 +257,129 @@ impl Installation {
                 }
 
             }
-            false => Ok(String::from(&self.userdata_path))
-        };
-        match userdata_path {
-            Ok(path) => {
-                //self.userdata_path = (&path).parse().unwrap();
-                Ok((path).parse().unwrap())
+            false => Some(String::from(&self.userdata_path))
+        }
+    }
+
+    pub fn set_resolution(&mut self, res: String) -> Result<(), String> {
+        let err = Err(format!("Could not parse resolution string: {}", res));
+        match res.split_once("x") {
+            Some((x, y)) => {
+                match (x.parse::<u32>(), y.parse::<u32>()) {
+                    (Ok(x), Ok(y)) => {
+                        self.resolution = (x, y);
+                        Ok(())
+                    },
+                    result => err
+                }
             },
-            Err(_) => Err(())
+            _ => err
+        }
+    }
+
+    pub fn get_resolution(&self) -> (u32, u32) {
+        self.resolution.clone()
+    }
+
+    pub fn get_resolution_string(&self) -> String {
+        format!("{}x{}", self.resolution.0, self.resolution.1)
+    }
+    
+    pub fn get_attribute<'a>(&'a self, attr: &'a InstallationAttribute) -> String {
+        let res = self.get_resolution_string();
+        let ergc = format_ergc(&self.ergc);
+        match attr {
+            InstallationAttribute::Checksum => self.checksum.clone(),
+            InstallationAttribute::InstallPath => self.path.clone(),
+            InstallationAttribute::UserdataPath => self.get_userdata_path().unwrap_or(String::from("<will be generated>")),
+            //.expect(&format!("Error retrieving userdata path for {}", self.game)),
+            InstallationAttribute::ERGC => ergc,
+            InstallationAttribute::Resolution => res,
+            InstallationAttribute::InstallationSource => self.install_source.as_ref().unwrap_or(&String::from("")).clone()
+        }
+    }
+
+    pub fn set_attribute(&mut self, attr: &InstallationAttribute, value: String) -> Result<(), String> {
+        match attr {
+            InstallationAttribute::Checksum => {
+                self.checksum = value;
+            },
+            InstallationAttribute::InstallPath => {
+                self.path = value;
+            },
+            InstallationAttribute::UserdataPath => {
+                // self.userdata_path = value;
+                // self.get_userdata_path().unwrap_or(String::from("<will be generated>"))
+            },
+            //.expect(&format!("Error retrieving userdata path for {}", self.game)),
+            InstallationAttribute::ERGC => {
+                self.ergc = value.replace("-", "");
+                println!("ERGC: {}", self.ergc);
+            },
+            InstallationAttribute::Resolution => {
+                self.set_resolution(value)?
+            }
+            InstallationAttribute::InstallationSource => 
+            {
+                self.install_source = Some(value);
+            },
+
+        };
+        
+        Ok(())
+    }
+
+    pub fn get_full_checksum<'a>(&'a self, other: &'a Installation) -> Option<String> {
+        if self.checksum == String::default() || (self.game == Game::BFME2 && other.checksum == String::default()) {
+            None
+        } else {
+            match self.game {
+                Game::BFME2 => Some(self.checksum.clone()),
+                Game::ROTWK => {
+                    let bfme2_checksum = other.checksum.clone();
+                    let full_checksum = md5sum::<Md5, _>(
+                        &mut Cursor::new((bfme2_checksum + &self.checksum).as_bytes()))
+                        .expect("ERROR: Could not create checksum over BFME2 and ROTWK individual checksums");
+                    let md5_str = format!("{:x}", full_checksum);
+                    Some(md5_str)
+                }
+            }
+        }
+    }
+
+    pub fn is_installation_ready(&self) -> bool {
+        let re = Regex::new(r"^([A-Z0-9]{4}-?){5}$").unwrap();
+
+        (self.install_source.is_some()) 
+        && PathBuf::from(&self.install_source.as_ref().unwrap()).is_dir() 
+        && PathBuf::from(&self.install_source.as_ref().unwrap()).join(format!("{}_0.tar.gz", self.game)).exists()
+        && re.is_match(&format_ergc(&self.ergc))
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct InstallationUIState {
+    pub resolution_input: text_input::State,
+    pub ergc_input: text_input::State,
+    pub install_button: button::State,
+    pub compat_image_checksum: image::viewer::State,
+    pub compat_image_ergc: image::viewer::State
+}
+
+impl InstallationUIState {
+    pub fn new() -> InstallationUIState {
+        InstallationUIState{
+            resolution_input: text_input::State::default(),
+            ergc_input: text_input::State::default(),
+            install_button: button::State::default(),
+            compat_image_checksum: image::viewer::State::default(),
+            compat_image_ergc: image::viewer::State::default()
         }
     }
 }
 
-pub fn format_ergc(ergc: String) -> String {
+pub fn format_ergc(ergc: &str) -> String {
 
     ergc
         .replace("-", "").chars()

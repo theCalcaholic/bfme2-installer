@@ -1,5 +1,5 @@
 [package]
-name = "bfme2-installer"
+name = "bfme2_installer"
 version = "0.1.0"
 edition = "2018"
 

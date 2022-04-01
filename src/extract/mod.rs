@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use flate2::read::{GzDecoder};
 use tar::{Archive, Entry, Entries};
 use std::hash::{Hash, Hasher};
-use std::io::Read;
-use iced::ProgressBar;
 use iced_futures::futures;
 use std::collections::VecDeque;
+
+use crate::common::{Message, InstallationProgress};
 
 // pub fn extract<I: 'static + Hash + Copy + Send, S: ToString>(id: I, from: S, to: S
 // ) -> iced::Subscription<(I, Progress)> {
@@ -30,7 +30,7 @@ where
     T: 'static + Hash + Copy + Send,
     H: Hasher,
 {
-    type Output = (T, Progress);
+    type Output = (T, InstallationProgress);
 
     fn hash(&self, state: &mut H) {
         struct Marker;
@@ -52,7 +52,7 @@ where
                 match state {
                     ExtractionState::Start(target, mut archives, count, total) => {
                         Some((
-                            (id, Progress::Advanced(count as f32 * total * 100.0,
+                            (id, InstallationProgress::Extracting(count as f32 * total * 100.0,
                                           String::from(archives.front().unwrap_or(&("Done".to_string()))))),
                             ExtractionState::Extracting(target, archives, count, total)
                             ))
@@ -68,7 +68,7 @@ where
                                 match archive.unpack(PathBuf::from(&target)) {
                                     Ok(()) => {
                                         Some((
-                                            (id, Progress::Advanced((count + 1) as f32 * 100.0 / total,
+                                            (id, InstallationProgress::Extracting((count + 1) as f32 * 100.0 / total,
                                                                     String::from(archives.front().unwrap_or(&("Done".to_string()))))),
                                             ExtractionState::Extracting(target,
                                                                         archives,
@@ -79,14 +79,14 @@ where
                                     Err(e) => {
                                         println!("ERROR: {}", e.to_string());
                                         Some((
-                                            (id, Progress::Errored),
+                                            (id, InstallationProgress::Errored(e.to_string())),
                                             ExtractionState::Finished
                                         ))
                                     }
                                 }
                             },
                             None => Some((
-                                (id, Progress::Finished),
+                                (id, InstallationProgress::Finished),
                                 ExtractionState::Finished
                             ))
                         }
@@ -102,13 +102,13 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Progress {
-    Started,
-    Advanced(f32, String),
-    Finished,
-    Errored,
-}
+// #[derive(Debug, Clone)]
+// pub enum Progress {
+//     Started,
+//     Advanced(f32, String),
+//     Finished,
+//     Errored,
+// }
 
 pub enum ExtractionState { //<'a, R: Read> {
     // Extracting {
