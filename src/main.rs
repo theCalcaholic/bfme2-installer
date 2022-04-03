@@ -8,7 +8,7 @@ mod components;
 use std::cell::Cell;
 use std::io::{Cursor};
 use std::collections::HashMap;
-use bfme2_installer::common::InstallationProgress;
+use common::InstallationProgress;
 use installer::{Installer, InstallerStep};
 use md5::Md5;
 use common::{Message, Game, Installation, format_ergc, InstallationUIState};

@@ -4,6 +4,7 @@ use super::checksums::Progress as ValidationProgress;
 use super::components::InstallationEvent;
 use std::env;
 use std::path::PathBuf;
+use std::ptr::NonNull;
 use md5::{Digest, Md5};
 use md5::digest::Output;
 use regex::Regex;
@@ -329,14 +330,15 @@ impl Installation {
         Ok(())
     }
 
-    pub fn get_full_checksum<'a>(&'a self, other: &'a Installation) -> Option<String> {
-        if self.checksum == String::default() || (self.game == Game::BFME2 && other.checksum == String::default()) {
-            None
-        } else {
-            match self.game {
-                Game::BFME2 => Some(self.checksum.clone()),
-                Game::ROTWK => {
-                    let bfme2_checksum = other.checksum.clone();
+    pub fn get_full_checksum<'a>(&'a self, other: Option<&'a Installation>) -> Option<String> {
+        match (self.game, other) {
+            (Game::BFME2, _) => Some(self.checksum.clone()),
+            (Game::ROTWK, None) => None,
+            (Game::ROTWK, Some(other_inst)) => {
+                if other_inst.checksum.is_empty() {
+                    None
+                } else {
+                    let bfme2_checksum = other_inst.checksum.clone();
                     let full_checksum = md5sum::<Md5, _>(
                         &mut Cursor::new((bfme2_checksum + &self.checksum).as_bytes()))
                         .expect("ERROR: Could not create checksum over BFME2 and ROTWK individual checksums");
@@ -345,6 +347,22 @@ impl Installation {
                 }
             }
         }
+        // if self.checksum == String::default() || (self.game == Game::ROTWK && other.checksum == String::default()) {
+        //     println!("Not returning checksum.. game was {}, own cs: {}, other cs: {}", self.game, self.checksum, other.checksum);
+        //     None
+        // } else {
+        //     match self.game {
+        //         Game::BFME2 => Some(self.checksum.clone()),
+        //         Game::ROTWK => {
+        //             let bfme2_checksum = other.checksum.clone();
+        //             let full_checksum = md5sum::<Md5, _>(
+        //                 &mut Cursor::new((bfme2_checksum + &self.checksum).as_bytes()))
+        //                 .expect("ERROR: Could not create checksum over BFME2 and ROTWK individual checksums");
+        //             let md5_str = format!("{:x}", full_checksum);
+        //             Some(md5_str)
+        //         }
+        //     }
+        // }
     }
 
     pub fn is_installation_ready(&self) -> bool {

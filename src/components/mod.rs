@@ -183,10 +183,7 @@ impl InstallationView {
                 .push(validate_button));
             
             if installation.is_complete {
-                let full_checksum = match other_installation {
-                    Some(other) => installation.get_full_checksum(other),
-                    None => None
-                };
+                let full_checksum = installation.get_full_checksum(other_installation);
 
                 col = col.push(Space::new(Length::Fill, Length::Units(60)))
                     .push(Row::new()

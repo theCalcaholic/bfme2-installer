@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::iter::Copied;
 use iced::Subscription;
 use iced_native::subscription;
 use md5::{Digest, Md5};
 use md5::digest::Output;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, StripPrefixError};
 use std::fs::{File, OpenOptions, self};
 use std::fs::{read_to_string};
 use std::hash::{Hash, Hasher};
@@ -47,7 +48,20 @@ pub fn generate_files_list(path: PathBuf) -> Vec<String> {
                     None => None
                 })
                 .map(|t| String::from(t.0))
-                .collect()
+                .map(|file_path| {
+                    let p = PathBuf::from(&file_path);
+                    match p.strip_prefix(install_path) {
+                        Ok(rel_path) => match rel_path.to_owned().into_os_string().into_string() {
+                            Ok(rel_path_str) => Ok(rel_path_str),
+                            Err(e) => Err(format!("Failed to get string for file: {:?}", e))
+                        },
+                        Err(e) => Ok(file_path)
+                    }
+                    // let a = p.strip_prefix(install_path).to_owned();
+                })
+                // .map(|p| p.to_owned().into_os_string().into_string())
+                .collect::<Result<Vec<String>, String>>()
+                .expect("Invalid path!")
         },
         Err(_) => {
             install_path.read_dir()
@@ -59,7 +73,20 @@ pub fn generate_files_list(path: PathBuf) -> Vec<String> {
                     false => Vec::from([String::from(f.path().to_str().unwrap())])
                 })
                 .flatten()
-                .collect()
+                .map(|file_path| {
+                    let p = PathBuf::from(&file_path);
+                    match p.strip_prefix(install_path) {
+                        Ok(rel_path) => match rel_path.to_owned().into_os_string().into_string() {
+                            Ok(rel_path_str) => Ok(rel_path_str),
+                            Err(e) => Err(format!("Failed to get string for file: {:?}", e))
+                        },
+                        Err(e) => Err(e.to_string())
+                    }
+                    // let a = p.strip_prefix(install_path).to_owned();
+                })
+                // .map(|p| p.to_owned().into_os_string().into_string())
+                .collect::<Result<Vec<String>, String>>()
+                .expect("Invalid path!")
         }
     }
 
@@ -68,7 +95,7 @@ pub fn generate_files_list(path: PathBuf) -> Vec<String> {
 pub fn write_checksums_file<S>(install_path: S, results: Vec<(String, String)>) -> Result<(), std::io::Error> 
     where S: Into<String> 
 {
-    let checksum_path = PathBuf::from(install_path.into()).join("checksums.txt");
+    let checksum_path = PathBuf::from(&install_path.into()).join("checksums.txt");
     // if checksum_path.exists() {
     //     fs::remove_file(&checksum_path)?
     // }
@@ -106,101 +133,9 @@ pub fn calculate_hash(path: PathBuf) -> Result<String, String> {
 
 pub struct ChecksumGenerator<I> {
     pub id: I,
+    pub install_path: String,
     pub path: String,
 }
-
-// impl<H, I, T> iced_native::subscription::Recipe<H, I> for ChecksumGenerator<T>
-//     where
-//         T: 'static + Hash + Copy + Send,
-//         H: Hasher
-// {
-//     type Output = (T, Progress);
-
-//     fn hash(&self, state: &mut H) {
-//         struct Marker;
-//         std::any::TypeId::of::<Marker>().hash(state);
-//         self.id.hash(state);
-//     }
-
-//     fn stream(self: Box<Self>, _input: BoxStream<I>) -> BoxStream<Self::Output> {
-//         let id = self.id;
-
-//         println!("Retrieving list of files...");
-//         let file_queue = generate_files_list(PathBuf::from(&self.path));
-//         let initial_state = ChecksumState::Start(
-//             (&*self.path).parse().unwrap(),
-//             Vec::new(),
-//             VecDeque::from(file_queue.clone()),
-//             0, file_queue.iter().count() as u32);
-
-//         Box::pin(futures::stream::unfold(
-//             initial_state,
-//             move |state| async move {
-//                 match state {
-//                     ChecksumState::Start(install_path, checksums, file_queue, count, total) => {
-//                         Some((
-//                             (id, Progress::Generating(0.0)),
-//                             ChecksumState::Generating(install_path,checksums, file_queue, count, total)
-//                         ))
-//                     },
-//                     ChecksumState::Generating(install_path, mut checksums, mut file_queue, count, total) => {
-//                         match file_queue.pop_front() {
-//                             Some(file_path) => {
-//                                 println!("Calculating md5 sum for {}", file_path);
-//                                 if file_path.ends_with("checksums.txt") {
-//                                     return Some((
-//                                         (id, Progress::Generating((count + 1) as f32 * 100.0 / (total as f32))),
-//                                         ChecksumState::Generating(
-//                                             install_path,
-//                                             checksums,
-//                                             file_queue,
-//                                             count + 1,
-//                                             total)
-//                                     ));
-//                                 }
-//                                 match calculate_hash(PathBuf::from(&file_path)) {
-//                                     Ok(cs) => {
-//                                         checksums.push(format!("{}|{}", file_path, cs));
-//                                         let state =
-//                                             ChecksumState::Generating(
-//                                                 install_path,
-//                                                 checksums,
-//                                                 file_queue,
-//                                                 count + 1,
-//                                                 total);
-//                                         Some((
-//                                             (id, Progress::Generating((count + 1) as f32 * 100.0 / (total as f32))),
-//                                             state
-//                                         ))
-//                                     },
-//                                     Err(e) => Some((
-//                                         (id, Progress::Errored),
-//                                         ChecksumState::Finished
-//                                     ))
-//                                 }
-//                             },
-//                             None => {
-//                                 File::create(PathBuf::from(install_path).join("checksums.txt"))
-//                                     .unwrap()
-//                                     .write(checksums.join("\n").as_bytes());
-//                                 return Some((
-//                                     (id, Progress::Finished),
-//                                     ChecksumState::Finished
-//                                 ))
-//                             }
-
-//                         }
-//                     },
-//                     ChecksumState::Finished => {
-//                         let _: () = iced::futures::future::pending().await;
-//                         None
-//                     }
-//                 }
-//             }
-//         ))
-//     }
-
-// }
 
 
 impl<H, I, T> iced_native::subscription::Recipe<H, I> for ChecksumGenerator<T> where T: 'static + Hash + Copy + Send, H: Hasher {
@@ -215,7 +150,7 @@ impl<H, I, T> iced_native::subscription::Recipe<H, I> for ChecksumGenerator<T> w
     fn stream(self: Box<Self>, _input: futures::stream::BoxStream<'static, I>,) -> futures::stream::BoxStream<'static, Self::Output> { 
         let id = self.id;
         Box::pin(futures::stream::unfold(
-                State::Start(self.path),
+                State::Start(self.install_path, self.path),
             move |state| {
                 process_file(id, state)
             }
@@ -225,11 +160,11 @@ impl<H, I, T> iced_native::subscription::Recipe<H, I> for ChecksumGenerator<T> w
 
 async fn process_file<I: Copy>(id: I, state: State) -> Option<((I, InstallationProgress), State)> {
     match state {
-        State::Start(path) => {
+        State::Start(install_path, path) => {
             if path.ends_with("checksums.txt") {
                 Some(((id.into(), InstallationProgress::Skipped), State::Finished))
             } else {
-                match calculate_hash(PathBuf::from(&path)) {
+                match calculate_hash(PathBuf::from(&install_path).join(&path)) {
                     Ok(cs) => {
                         Some(((id, InstallationProgress::ChecksumResult(path, cs)), State::Finished))
                     },
@@ -254,7 +189,7 @@ enum ChecksumState {
 
 #[derive(Debug, Clone)]
 enum State {
-    Start(String),
+    Start(String, String),
     Finished
 }
 
