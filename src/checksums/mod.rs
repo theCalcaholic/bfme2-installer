@@ -69,7 +69,16 @@ pub fn generate_files_list(path: PathBuf) -> Vec<String> {
                 .filter_map(|r| r.ok())
                 .filter(|f| f.file_name() != "checksums.txt")
                 .map(|f| match f.path().is_dir() {
-                    true => generate_files_list(f.path().to_path_buf()),
+                    true => {
+                        generate_files_list(f.path().to_path_buf()).into_iter()
+                            .map(|sub_f| {
+                                if PathBuf::from(&sub_f).starts_with(f.path()) {
+                                    sub_f
+                                } else {
+                                    f.path().join(&sub_f).to_owned().into_os_string().into_string().unwrap()
+                                }
+                        }).collect::<Vec<String>>()
+                    },
                     false => Vec::from([String::from(f.path().to_str().unwrap())])
                 })
                 .flatten()

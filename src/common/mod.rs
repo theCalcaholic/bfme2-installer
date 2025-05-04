@@ -128,7 +128,7 @@ impl Installation {
     pub(crate) fn defaults(game: Game) -> Installation {
         return Installation {
             game,
-            path: String::default(),
+            path: format!("C:\\Pgroam Files (x86)\\Electronic Arts\\{}", game),
             userdata_path: String::default(),
             checksum: String::default(),
             ergc: String::default(),
@@ -263,7 +263,7 @@ impl Installation {
     }
 
     pub fn set_resolution(&mut self, res: String) -> Result<(), String> {
-        let err = Err(format!("Could not parse resolution string: {}", res));
+        let err: Result<(), String> = Err(format!("Could not parse resolution string: {}", res));
         match res.split_once("x") {
             Some((x, y)) => {
                 match (x.parse::<u32>(), y.parse::<u32>()) {
@@ -271,10 +271,16 @@ impl Installation {
                         self.resolution = (x, y);
                         Ok(())
                     },
-                    result => err
+                    result => {
+                        println!("Invalid resolution {} (must be in format: <number>x<number>", res);
+                        Ok(())
+                    }
                 }
             },
-            _ => err
+            _ => {
+                println!("Invalid resolution {} (must be in format: <number>x<number>", res);
+                Ok(())
+            }
         }
     }
 
